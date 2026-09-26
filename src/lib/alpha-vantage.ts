@@ -1,3 +1,5 @@
+import "server-only";
+
 export type AlphaVantageQuote = {
   price: number;
   previousClose: number;

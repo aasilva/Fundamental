@@ -4,14 +4,19 @@ import { z } from "zod";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { SUPPORTED_CURRENCIES } from "@/lib/format";
 
 const holdingSchema = z.object({
-  ticker: z.string().trim().min(1).max(20).toUpperCase(),
+  ticker: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .regex(/^[A-Z0-9.\-]{1,20}$/, "Ticker inválido"),
   name: z.string().trim().max(200).optional().or(z.literal("")),
-  quantity: z.coerce.number().positive(),
-  entry_price: z.coerce.number().nonnegative(),
-  entry_date: z.string().min(1),
-  currency: z.string().trim().min(1).max(10).default("EUR"),
+  quantity: z.coerce.number().positive("A quantidade tem de ser maior que 0"),
+  entry_price: z.coerce.number().nonnegative("O preço de entrada não pode ser negativo"),
+  entry_date: z.iso.date("Data de entrada inválida"),
+  currency: z.enum(SUPPORTED_CURRENCIES, "Moeda não suportada"),
   notes: z.string().trim().max(1000).optional().or(z.literal("")),
 });
 

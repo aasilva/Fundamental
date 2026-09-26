@@ -1,4 +1,6 @@
 import type { Holding } from "@/lib/calculations";
+import { SUPPORTED_CURRENCIES } from "@/lib/format";
+import { SubmitButton } from "@/components/submit-button";
 
 const inputClass =
   "rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50";
@@ -24,23 +26,33 @@ export function HoldingForm({
             id="ticker"
             name="ticker"
             required
-            placeholder="EDP.LS, AAPL, ..."
+            placeholder="AAPL, TSCO.LON, MBG.DEX"
             defaultValue={defaultValues?.ticker ?? ""}
             className={inputClass}
           />
         </div>
         <div className="flex flex-col gap-1.5">
           <label htmlFor="currency" className={labelClass}>
-            Moeda
+            Moeda de cotação
           </label>
-          <input
+          <select
             id="currency"
             name="currency"
             defaultValue={defaultValues?.currency ?? "EUR"}
             className={inputClass}
-          />
+          >
+            {SUPPORTED_CURRENCIES.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
+      <p className="-mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+        Usa o símbolo da Alpha Vantage (bolsas fora dos EUA levam sufixo, ex: .LON, .DEX) e a
+        moeda em que a ação é cotada — a cotação atual vem nessa moeda.
+      </p>
 
       <div className="flex flex-col gap-1.5">
         <label htmlFor="name" className={labelClass}>
@@ -115,12 +127,7 @@ export function HoldingForm({
         />
       </div>
 
-      <button
-        type="submit"
-        className="mt-2 rounded-md bg-zinc-950 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-950 dark:hover:bg-zinc-200"
-      >
-        {submitLabel}
-      </button>
+      <SubmitButton>{submitLabel}</SubmitButton>
     </form>
   );
 }

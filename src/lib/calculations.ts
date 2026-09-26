@@ -11,6 +11,15 @@ export type HoldingWithPnl = Holding & {
   pnlPct: number | null;
 };
 
+export type CurrencySummary = {
+  currency: string;
+  totalCost: number;
+  totalValue: number;
+  totalPnlAbs: number;
+  totalPnlPct: number;
+  missingQuotes: number;
+};
+
 export function computePnl(
   holding: Holding,
   quote: { price: number; fetchedAt: string } | undefined,
@@ -32,11 +41,34 @@ export function computePnl(
   };
 }
 
-export function summarizePortfolio(holdings: HoldingWithPnl[]) {
-  const totalCost = holdings.reduce((sum, h) => sum + h.costBasis, 0);
-  const totalValue = holdings.reduce((sum, h) => sum + (h.currentValue ?? h.costBasis), 0);
-  const totalPnlAbs = totalValue - totalCost;
-  const totalPnlPct = totalCost > 0 ? (totalPnlAbs / totalCost) * 100 : 0;
+/**
+ * Totais agrupados por moeda: somar USD com EUR sem câmbio daria um número sem significado.
+ * Posições sem cotação entram ao preço de custo (P&L 0) e são contadas em missingQuotes.
+ */
+export function summarizeByCurrency(holdings: HoldingWithPnl[]): CurrencySummary[] {
+  const byCurrency = new Map<string, CurrencySummary>();
 
-  return { totalCost, totalValue, totalPnlAbs, totalPnlPct };
+  for (const h of holdings) {
+    const summary = byCurrency.get(h.currency) ?? {
+      currency: h.currency,
+      totalCost: 0,
+      totalValue: 0,
+      totalPnlAbs: 0,
+      totalPnlPct: 0,
+      missingQuotes: 0,
+    };
+    summary.totalCost += h.costBasis;
+    summary.totalValue += h.currentValue ?? h.costBasis;
+    if (h.currentValue === null) summary.missingQuotes += 1;
+    byCurrency.set(h.currency, summary);
+  }
+
+  return [...byCurrency.values()].map((s) => {
+    const totalPnlAbs = s.totalValue - s.totalCost;
+    return {
+      ...s,
+      totalPnlAbs,
+      totalPnlPct: s.totalCost > 0 ? (totalPnlAbs / s.totalCost) * 100 : 0,
+    };
+  });
 }

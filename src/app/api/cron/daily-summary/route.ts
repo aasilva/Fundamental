@@ -1,17 +1,27 @@
+import { timingSafeEqual } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { Resend } from "resend";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getQuotesForTickers } from "@/lib/quotes";
-import { computePnl, summarizePortfolio } from "@/lib/calculations";
+import { computePnl, summarizeByCurrency } from "@/lib/calculations";
 import { renderDailySummaryEmail } from "@/lib/email/daily-summary";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 const FROM_EMAIL = process.env.NOTIFICATIONS_FROM_EMAIL ?? "Fundamental <onboarding@resend.dev>";
 
+function isAuthorized(request: NextRequest) {
+  const secret = process.env.CRON_SECRET;
+  // Sem segredo configurado o endpoint fica fechado (senão "Bearer undefined" passaria).
+  if (!secret) return false;
+  const received = Buffer.from(request.headers.get("authorization") ?? "");
+  const expected = Buffer.from(`Bearer ${secret}`);
+  return received.length === expected.length && timingSafeEqual(received, expected);
+}
+
 export async function GET(request: NextRequest) {
-  const authHeader = request.headers.get("authorization");
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (!isAuthorized(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -26,25 +36,40 @@ export async function GET(request: NextRequest) {
   if (settingsError) {
     return NextResponse.json({ error: settingsError.message }, { status: 500 });
   }
+  if (!settings || settings.length === 0) {
+    return NextResponse.json({ results: [] });
+  }
+
+  const { data: allHoldings, error: holdingsError } = await admin
+    .from("holdings")
+    .select("*")
+    .in(
+      "user_id",
+      settings.map((s) => s.user_id),
+    );
+
+  if (holdingsError) {
+    return NextResponse.json({ error: holdingsError.message }, { status: 500 });
+  }
+
+  // Uma só ronda de cotações para todos os utilizadores (poupa pedidos à Alpha Vantage).
+  const quotes = await getQuotesForTickers((allHoldings ?? []).map((h) => h.ticker));
 
   const results: Array<{ user_id: string; status: string }> = [];
 
-  for (const setting of settings ?? []) {
-    const { data: holdings } = await admin
-      .from("holdings")
-      .select("*")
-      .eq("user_id", setting.user_id);
+  for (const setting of settings) {
+    const holdings = (allHoldings ?? []).filter((h) => h.user_id === setting.user_id);
 
-    if (!holdings || holdings.length === 0) {
+    if (holdings.length === 0) {
       results.push({ user_id: setting.user_id, status: "sem ações, ignorado" });
       continue;
     }
 
-    const quotes = await getQuotesForTickers(holdings.map((h) => h.ticker));
     const withPnl = holdings.map((h) => computePnl(h, quotes[h.ticker]));
-    const summary = summarizePortfolio(withPnl);
-    const currency = holdings[0]?.currency ?? "EUR";
-    const alertTriggered = Math.abs(summary.totalPnlPct) >= setting.alert_threshold_pct;
+    const summaries = summarizeByCurrency(withPnl);
+    const alertTriggered = summaries.some(
+      (s) => Math.abs(s.totalPnlPct) >= setting.alert_threshold_pct,
+    );
 
     const { data: userData, error: userError } = await admin.auth.admin.getUserById(
       setting.user_id,
@@ -55,36 +80,31 @@ export async function GET(request: NextRequest) {
       continue;
     }
 
-    const html = renderDailySummaryEmail({
-      holdings: withPnl,
-      totalCost: summary.totalCost,
-      totalValue: summary.totalValue,
-      totalPnlAbs: summary.totalPnlAbs,
-      totalPnlPct: summary.totalPnlPct,
-      currency,
-      alertTriggered,
-      alertThresholdPct: setting.alert_threshold_pct,
+    const { error: sendError } = await resend.emails.send({
+      from: FROM_EMAIL,
+      to: userData.user.email,
+      subject: alertTriggered
+        ? `⚠️ Alerta: a tua carteira variou mais de ${setting.alert_threshold_pct}%`
+        : "O teu resumo diário da carteira",
+      html: renderDailySummaryEmail({
+        holdings: withPnl,
+        summaries,
+        alertTriggered,
+        alertThresholdPct: setting.alert_threshold_pct,
+      }),
     });
 
-    try {
-      await resend.emails.send({
-        from: FROM_EMAIL,
-        to: userData.user.email,
-        subject: alertTriggered
-          ? `⚠️ Alerta de carteira: variação de ${summary.totalPnlPct.toFixed(2)}%`
-          : "O teu resumo diário da carteira",
-        html,
-      });
-
-      await admin
-        .from("notification_settings")
-        .update({ last_notified_at: new Date().toISOString() })
-        .eq("user_id", setting.user_id);
-
-      results.push({ user_id: setting.user_id, status: "enviado" });
-    } catch (err) {
-      results.push({ user_id: setting.user_id, status: `erro: ${(err as Error).message}` });
+    if (sendError) {
+      results.push({ user_id: setting.user_id, status: `erro: ${sendError.message}` });
+      continue;
     }
+
+    await admin
+      .from("notification_settings")
+      .update({ last_notified_at: new Date().toISOString() })
+      .eq("user_id", setting.user_id);
+
+    results.push({ user_id: setting.user_id, status: "enviado" });
   }
 
   return NextResponse.json({ results });

@@ -1,22 +1,19 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { getQuotesForTickers } from "@/lib/quotes";
-import { computePnl, summarizePortfolio } from "@/lib/calculations";
+import { computePnl, summarizeByCurrency } from "@/lib/calculations";
+import { formatCurrency, formatDate, formatDateTime, formatPct } from "@/lib/format";
+import { DeleteHoldingButton } from "@/components/delete-holding-button";
 import { deleteHolding } from "./holdings/actions";
-
-function formatCurrency(value: number, currency: string) {
-  return new Intl.NumberFormat("pt-PT", { style: "currency", currency }).format(value);
-}
-
-function formatPct(value: number) {
-  return `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
-}
 
 function pnlColor(value: number) {
   if (value > 0) return "text-emerald-600 dark:text-emerald-400";
   if (value < 0) return "text-red-600 dark:text-red-400";
   return "text-zinc-500 dark:text-zinc-400";
 }
+
+const cardClass =
+  "rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-zinc-950";
 
 export default async function DashboardPage() {
   const supabase = await createClient();
@@ -30,12 +27,16 @@ export default async function DashboardPage() {
   const quotes = await getQuotesForTickers(rows.map((h) => h.ticker));
 
   const withPnl = rows.map((h) => computePnl(h, quotes[h.ticker]));
-  const summary = summarizePortfolio(withPnl);
-  const baseCurrency = rows[0]?.currency ?? "EUR";
+  const summaries = summarizeByCurrency(withPnl);
+  const missingQuotes = withPnl.filter((h) => h.currentPrice === null).length;
+  const oldestQuote = withPnl
+    .map((h) => h.quoteFetchedAt)
+    .filter((d): d is string => d !== null)
+    .sort()[0];
 
   return (
     <div className="mx-auto w-full max-w-5xl px-4 py-10">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-2xl font-semibold text-zinc-950 dark:text-zinc-50">
           A minha carteira
         </h1>
@@ -47,28 +48,43 @@ export default async function DashboardPage() {
         </Link>
       </div>
 
-      {rows.length > 0 ? (
-        <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-zinc-950">
-            <p className="text-sm text-zinc-500 dark:text-zinc-400">Valor atual</p>
-            <p className="mt-1 text-xl font-semibold text-zinc-950 dark:text-zinc-50">
-              {formatCurrency(summary.totalValue, baseCurrency)}
-            </p>
-          </div>
-          <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-zinc-950">
-            <p className="text-sm text-zinc-500 dark:text-zinc-400">Custo total</p>
-            <p className="mt-1 text-xl font-semibold text-zinc-950 dark:text-zinc-50">
-              {formatCurrency(summary.totalCost, baseCurrency)}
-            </p>
-          </div>
-          <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-zinc-950">
-            <p className="text-sm text-zinc-500 dark:text-zinc-400">Lucro / Prejuízo</p>
-            <p className={`mt-1 text-xl font-semibold ${pnlColor(summary.totalPnlAbs)}`}>
-              {formatCurrency(summary.totalPnlAbs, baseCurrency)}{" "}
-              <span className="text-sm">({formatPct(summary.totalPnlPct)})</span>
-            </p>
+      {summaries.map((s) => (
+        <div key={s.currency} className="mt-6">
+          {summaries.length > 1 ? (
+            <h2 className="mb-2 text-sm font-medium text-zinc-500 dark:text-zinc-400">
+              Posições em {s.currency}
+            </h2>
+          ) : null}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <div className={cardClass}>
+              <p className="text-sm text-zinc-500 dark:text-zinc-400">Valor atual</p>
+              <p className="mt-1 text-xl font-semibold text-zinc-950 dark:text-zinc-50">
+                {formatCurrency(s.totalValue, s.currency)}
+              </p>
+            </div>
+            <div className={cardClass}>
+              <p className="text-sm text-zinc-500 dark:text-zinc-400">Custo total</p>
+              <p className="mt-1 text-xl font-semibold text-zinc-950 dark:text-zinc-50">
+                {formatCurrency(s.totalCost, s.currency)}
+              </p>
+            </div>
+            <div className={cardClass}>
+              <p className="text-sm text-zinc-500 dark:text-zinc-400">Lucro / Prejuízo</p>
+              <p className={`mt-1 text-xl font-semibold ${pnlColor(s.totalPnlAbs)}`}>
+                {formatCurrency(s.totalPnlAbs, s.currency)}{" "}
+                <span className="text-sm">({formatPct(s.totalPnlPct)})</span>
+              </p>
+            </div>
           </div>
         </div>
+      ))}
+
+      {missingQuotes > 0 ? (
+        <p className="mt-4 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-950 dark:text-amber-200">
+          {missingQuotes === 1 ? "1 posição sem cotação" : `${missingQuotes} posições sem cotação`}{" "}
+          (ticker não reconhecido pela Alpha Vantage ou limite de pedidos atingido). Estas posições
+          entram nos totais ao preço de custo.
+        </p>
       ) : null}
 
       <div className="mt-8 overflow-x-auto rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-zinc-950">
@@ -104,7 +120,7 @@ export default async function DashboardPage() {
                     ) : null}
                   </td>
                   <td className="px-4 py-3 text-zinc-700 dark:text-zinc-300">
-                    {new Date(h.entry_date).toLocaleDateString("pt-PT")}
+                    {formatDate(h.entry_date)}
                   </td>
                   <td className="px-4 py-3 text-right text-zinc-700 dark:text-zinc-300">
                     {h.quantity}
@@ -138,12 +154,7 @@ export default async function DashboardPage() {
                       </Link>
                       <form action={deleteHolding}>
                         <input type="hidden" name="id" value={h.id} />
-                        <button
-                          type="submit"
-                          className="rounded-md border border-red-200 px-2.5 py-1 text-xs font-medium text-red-600 hover:bg-red-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950"
-                        >
-                          Eliminar
-                        </button>
+                        <DeleteHoldingButton ticker={h.ticker} />
                       </form>
                     </div>
                   </td>
@@ -153,6 +164,13 @@ export default async function DashboardPage() {
           </table>
         )}
       </div>
+
+      {oldestQuote ? (
+        <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
+          Cotações atualizadas desde {formatDateTime(oldestQuote)} (cache de{" "}
+          {process.env.QUOTE_CACHE_TTL_MINUTES ?? 60} min).
+        </p>
+      ) : null}
     </div>
   );
 }
