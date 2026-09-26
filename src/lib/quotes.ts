@@ -1,72 +1,115 @@
+import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { fetchQuoteFromAlphaVantage } from "@/lib/alpha-vantage";
+import { alphaVantageProvider } from "@/lib/quote-providers/alpha-vantage";
+import { finnhubProvider } from "@/lib/quote-providers/finnhub";
+import { aiWebSearchProvider } from "@/lib/quote-providers/ai-web-search";
+import type { QuoteSource } from "@/lib/quote-providers/types";
+import { runProviderChain, shouldRefresh } from "@/lib/quote-cache-policy";
 
-const CACHE_TTL_MINUTES = Number(process.env.QUOTE_CACHE_TTL_MINUTES ?? 60);
+// Ordem = prioridade. A pesquisa AI é o último recurso (mais lenta e com custo por pedido).
+const PROVIDERS = [alphaVantageProvider, finnhubProvider, aiWebSearchProvider];
 
-export type QuoteMap = Record<string, { price: number; previousClose: number; fetchedAt: string }>;
+export type QuoteInfo = {
+  price: number;
+  previousClose: number | null;
+  fetchedAt: string;
+  source: QuoteSource;
+  sourceUrl: string | null;
+};
 
-export async function getQuotesForTickers(tickers: string[]): Promise<QuoteMap> {
-  const uniqueTickers = [...new Set(tickers)];
-  if (uniqueTickers.length === 0) return {};
+export type QuoteFailure = { reason: "not_found" | "unavailable"; detail: string | null };
+
+export type QuotesResult = {
+  quotes: Record<string, QuoteInfo>;
+  failures: Record<string, QuoteFailure>;
+};
+
+export async function getQuotes(
+  holdings: Array<{ ticker: string; name: string | null; currency: string }>,
+): Promise<QuotesResult> {
+  const byTicker = new Map<string, { ticker: string; name: string | null; currency: string }>();
+  for (const h of holdings) {
+    if (!byTicker.has(h.ticker)) byTicker.set(h.ticker, h);
+  }
+  const tickers = [...byTicker.keys()];
+  if (tickers.length === 0) return { quotes: {}, failures: {} };
 
   const admin = createAdminClient();
+  const [{ data: cachedRows }, { data: failureRows }] = await Promise.all([
+    admin.from("quotes_cache").select("*").in("ticker", tickers),
+    admin.from("quote_lookup_failures").select("*").in("ticker", tickers),
+  ]);
 
-  const { data: cached } = await admin
-    .from("quotes_cache")
-    .select("ticker, price, previous_close, fetched_at")
-    .in("ticker", uniqueTickers);
+  const cache = new Map((cachedRows ?? []).map((row) => [row.ticker, row]));
+  const failures = new Map((failureRows ?? []).map((row) => [row.ticker, row]));
+  const now = Date.now();
 
-  const cacheByTicker = new Map((cached ?? []).map((row) => [row.ticker, row]));
-  const staleCutoff = Date.now() - CACHE_TTL_MINUTES * 60 * 1000;
+  const toRefresh = tickers.filter((t) => shouldRefresh(cache.get(t), failures.get(t), now));
 
-  const staleTickers = uniqueTickers.filter((ticker) => {
-    const row = cacheByTicker.get(ticker);
-    if (!row) return true;
-    return new Date(row.fetched_at).getTime() < staleCutoff;
-  });
+  await Promise.all(
+    toRefresh.map(async (ticker) => {
+      const holding = byTicker.get(ticker)!;
+      const result = await runProviderChain(
+        { ...holding, lastKnownPrice: cache.get(ticker)?.price ?? null },
+        PROVIDERS,
+      );
 
-  if (staleTickers.length > 0) {
-    const freshResults = await Promise.all(
-      staleTickers.map(async (ticker) => {
-        try {
-          const quote = await fetchQuoteFromAlphaVantage(ticker);
-          return quote ? { ticker, ...quote } : null;
-        } catch {
-          return null;
-        }
-      }),
-    );
-
-    const rowsToUpsert = freshResults.filter((r): r is { ticker: string; price: number; previousClose: number } => r !== null);
-
-    if (rowsToUpsert.length > 0) {
-      const { data: upserted } = await admin
-        .from("quotes_cache")
-        .upsert(
-          rowsToUpsert.map((r) => ({
-            ticker: r.ticker,
-            price: r.price,
-            previous_close: r.previousClose,
-            fetched_at: new Date().toISOString(),
-          })),
-          { onConflict: "ticker" },
-        )
-        .select("ticker, price, previous_close, fetched_at");
-
-      for (const row of upserted ?? []) {
-        cacheByTicker.set(row.ticker, row);
+      if (result.ok) {
+        const { data: row } = await admin
+          .from("quotes_cache")
+          .upsert(
+            {
+              ticker,
+              price: result.price,
+              previous_close: result.previousClose,
+              currency: holding.currency,
+              source: result.source,
+              source_url: result.sourceUrl,
+              fetched_at: new Date().toISOString(),
+            },
+            { onConflict: "ticker" },
+          )
+          .select("*")
+          .single();
+        if (row) cache.set(ticker, row);
+        await admin.from("quote_lookup_failures").delete().eq("ticker", ticker);
+        failures.delete(ticker);
+      } else {
+        const { data: row } = await admin
+          .from("quote_lookup_failures")
+          .upsert(
+            {
+              ticker,
+              reason: result.reason,
+              detail: result.detail.slice(0, 1000),
+              failed_at: new Date().toISOString(),
+            },
+            { onConflict: "ticker" },
+          )
+          .select("*")
+          .single();
+        if (row) failures.set(ticker, row);
       }
-    }
-  }
+    }),
+  );
 
-  const result: QuoteMap = {};
-  for (const ticker of uniqueTickers) {
-    const row = cacheByTicker.get(ticker);
+  const result: QuotesResult = { quotes: {}, failures: {} };
+  for (const ticker of tickers) {
+    const row = cache.get(ticker);
     if (row) {
-      result[ticker] = {
+      result.quotes[ticker] = {
         price: row.price,
-        previousClose: row.previous_close ?? row.price,
+        previousClose: row.previous_close,
         fetchedAt: row.fetched_at,
+        source: row.source as QuoteSource,
+        sourceUrl: row.source_url,
+      };
+    }
+    const failure = failures.get(ticker);
+    if (failure) {
+      result.failures[ticker] = {
+        reason: failure.reason as QuoteFailure["reason"],
+        detail: failure.detail,
       };
     }
   }

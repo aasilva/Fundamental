@@ -30,7 +30,7 @@ function renderHoldingRow(h: HoldingWithPnl) {
   return `
     <tr>
       <td style="${cell}">${escapeHtml(h.ticker)}</td>
-      <td style="${cell}text-align:right;">${h.currentPrice !== null ? formatCurrency(h.currentPrice, h.currency) : "—"}</td>
+      <td style="${cell}text-align:right;">${h.currentPrice !== null ? formatCurrency(h.currentPrice, h.currency) : "—"}${h.quoteSource === "ai_web_search" ? ' <span style="color:#a1a1aa;font-size:11px;">(AI)</span>' : ""}</td>
       <td style="${cell}text-align:right;">${h.currentValue !== null ? formatCurrency(h.currentValue, h.currency) : "—"}</td>
       <td style="${cell}text-align:right;color:${color};">${h.pnlAbs !== null ? `${formatCurrency(h.pnlAbs, h.currency)} (${formatPct(h.pnlPct ?? 0)})` : "—"}</td>
     </tr>`;

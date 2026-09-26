@@ -36,21 +36,48 @@ Em **Project Settings > API** no [painel Supabase](https://supabase.com/dashboar
 - `anon` / `publishable` key → `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `service_role` / `secret` key (nunca expor no browser) → `SUPABASE_SERVICE_ROLE_KEY`
 
-### 3. Alpha Vantage (cotações)
+### 3. Cotações (Alpha Vantage → Finnhub → pesquisa AI)
 
-Cria uma API key gratuita em https://www.alphavantage.co/support/#api-key e
-define `ALPHA_VANTAGE_API_KEY`.
+As cotações são pedidas por esta ordem; o primeiro fornecedor que responder
+ganha. Cada um só é usado se a respetiva chave estiver definida.
 
-- **Formato do ticker**: ações dos EUA usam o símbolo simples (`AAPL`, `MSFT`);
-  outras bolsas levam sufixo da Alpha Vantage (ex: `TSCO.LON` Londres,
-  `MBG.DEX` Frankfurt). Usa a pesquisa de símbolos da Alpha Vantage em caso de dúvida.
-- **Moeda**: escolhe a moeda em que a ação é cotada — a cotação atual vem
-  sempre nessa moeda e não há conversão cambial. Por isso os totais aparecem
-  separados por moeda.
-- ⚠️ O tier gratuito tem limite de **25 pedidos/dia** e **5/minuto**. As
-  cotações ficam em cache (`quotes_cache`) durante `QUOTE_CACHE_TTL_MINUTES`
-  (60 por defeito). Com muitos tickers diferentes, aumenta o TTL ou usa um
-  plano pago.
+| # | Fornecedor | Chave | Plano gratuito | Cobre |
+|---|---|---|---|---|
+| 1 | [Alpha Vantage](https://www.alphavantage.co/support/#api-key) | `ALPHA_VANTAGE_API_KEY` | 25 pedidos/dia, 5/min | EUA + várias bolsas (com sufixo) |
+| 2 | [Finnhub](https://finnhub.io/register) | `FINNHUB_API_KEY` | 60 pedidos/min | Só EUA no plano grátis |
+| 3 | Claude + pesquisa web | `ANTHROPIC_API_KEY` + `QUOTE_AI_ENABLED=true` | Pago por uso | Qualquer bolsa |
+
+- **Formato do ticker**: ações dos EUA usam o símbolo simples (`AAPL`); na
+  Alpha Vantage, outras bolsas levam sufixo (ex: `TSCO.LON`, `MBG.DEX`). A
+  pesquisa AI também usa o **nome** da posição, por isso preenche-o (ex:
+  "EDP - Energias de Portugal") para ações que as APIs não conhecem.
+- **Moeda**: escolhe a moeda em que a ação é cotada — não há conversão
+  cambial, por isso os totais aparecem separados por moeda.
+- **Cache**: cotações ficam em `quotes_cache` durante `QUOTE_CACHE_TTL_MINUTES`
+  (60) ou `QUOTE_AI_CACHE_TTL_MINUTES` (360) se vieram da AI. Falhas também
+  ficam em cache (`quote_lookup_failures`): um ticker que nenhum fornecedor
+  encontrou só é pesquisado de novo ao fim de `QUOTE_NOT_FOUND_RETRY_HOURS`
+  (24); falhas temporárias (limites, rede) ao fim de
+  `QUOTE_UNAVAILABLE_RETRY_MINUTES` (60). Entretanto mostra-se a última cotação conhecida.
+
+#### Pesquisa AI (último recurso)
+
+Usa o Claude (`claude-opus-5` por defeito, configurável em `QUOTE_AI_MODEL`)
+com a ferramenta de pesquisa web. Ativa-se com `QUOTE_AI_ENABLED=true` e uma
+chave de https://console.anthropic.com.
+
+- **Fiabilidade**: um modelo pode ler mal uma página, por isso a resposta só é
+  aceite se: o URL da fonte apareceu nos resultados reais da pesquisa; a moeda
+  coincide com a da posição; a data da cotação tem no máximo 7 dias; e o preço
+  não difere mais de 2× da última cotação conhecida. Cotações AI aparecem com
+  a etiqueta **AI** (liga para a fonte) no dashboard e "(AI)" no email.
+- **Custo**: $10 por 1.000 pesquisas + tokens (os resultados da pesquisa contam
+  como input). Com até 3 pesquisas por cotação, estima-se **~$0.10–0.25 por
+  cotação** com Claude Opus 5. Com o cache de 6h, no pior caso ~4 pesquisas por
+  dia por ticker que só a AI encontra. Define um limite de gastos em
+  console.anthropic.com → Limits.
+- Usa o fallback do servidor da Anthropic (`fallbacks: "default"`): se o
+  modelo recusar o pedido, a API tenta outro modelo automaticamente.
 
 ### 4. Resend (emails)
 
@@ -78,6 +105,12 @@ npm run dev
 ```
 
 Abre http://localhost:3000 — deves ser redirecionado para `/login`.
+
+Testes unitários (cache de cotações, cadeia de fornecedores, validação AI, cálculos):
+
+```bash
+npm test
+```
 
 ## Deploy na Vercel
 
@@ -129,8 +162,9 @@ src/
   components/                 botões com estado pendente / confirmação
   lib/
     supabase/                 clientes Supabase (browser, server, admin, sessão)
-    alpha-vantage.ts          integração com a API de cotações
-    quotes.ts                 cache de cotações (quotes_cache)
+    quote-providers/          Alpha Vantage, Finnhub e pesquisa AI (mesma interface)
+    quote-cache-policy.ts     quando refrescar + cadeia de fornecedores (testado)
+    quotes.ts                 cache de cotações e de falhas na base de dados
     calculations.ts           P&L por posição e totais por moeda
     format.ts                 formatação de moeda/datas, moedas suportadas
     email/daily-summary.ts    template do email diário

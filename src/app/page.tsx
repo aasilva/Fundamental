@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { getQuotesForTickers } from "@/lib/quotes";
+import { getQuotes } from "@/lib/quotes";
 import { computePnl, summarizeByCurrency } from "@/lib/calculations";
 import { formatCurrency, formatDate, formatDateTime, formatPct } from "@/lib/format";
 import { DeleteHoldingButton } from "@/components/delete-holding-button";
@@ -11,6 +11,9 @@ function pnlColor(value: number) {
   if (value < 0) return "text-red-600 dark:text-red-400";
   return "text-zinc-500 dark:text-zinc-400";
 }
+
+// A pesquisa AI (último recurso) pode demorar dezenas de segundos.
+export const maxDuration = 300;
 
 const cardClass =
   "rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-zinc-950";
@@ -24,7 +27,7 @@ export default async function DashboardPage() {
     .order("entry_date", { ascending: false });
 
   const rows = holdings ?? [];
-  const quotes = await getQuotesForTickers(rows.map((h) => h.ticker));
+  const { quotes, failures } = await getQuotes(rows);
 
   const withPnl = rows.map((h) => computePnl(h, quotes[h.ticker]));
   const summaries = summarizeByCurrency(withPnl);
@@ -82,8 +85,9 @@ export default async function DashboardPage() {
       {missingQuotes > 0 ? (
         <p className="mt-4 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-950 dark:text-amber-200">
           {missingQuotes === 1 ? "1 posição sem cotação" : `${missingQuotes} posições sem cotação`}{" "}
-          (ticker não reconhecido pela Alpha Vantage ou limite de pedidos atingido). Estas posições
-          entram nos totais ao preço de custo.
+          — nenhum fornecedor reconheceu o ticker ou os limites de pedidos foram atingidos. Estas
+          posições entram nos totais ao preço de custo; a pesquisa é repetida automaticamente mais
+          tarde.
         </p>
       ) : null}
 
@@ -129,7 +133,31 @@ export default async function DashboardPage() {
                     {formatCurrency(h.entry_price, h.currency)}
                   </td>
                   <td className="px-4 py-3 text-right text-zinc-700 dark:text-zinc-300">
-                    {h.currentPrice !== null ? formatCurrency(h.currentPrice, h.currency) : "—"}
+                    {h.currentPrice !== null ? (
+                      <>
+                        {formatCurrency(h.currentPrice, h.currency)}
+                        {h.quoteSource === "ai_web_search" && h.quoteSourceUrl ? (
+                          <a
+                            href={h.quoteSourceUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="Cotação obtida por pesquisa AI — confirma na fonte"
+                            className="ml-1.5 rounded bg-violet-100 px-1 py-0.5 text-[10px] font-semibold text-violet-700 hover:underline dark:bg-violet-950 dark:text-violet-300"
+                          >
+                            AI
+                          </a>
+                        ) : null}
+                      </>
+                    ) : failures[h.ticker] ? (
+                      <span
+                        title={failures[h.ticker].detail ?? undefined}
+                        className="text-xs text-amber-700 dark:text-amber-400"
+                      >
+                        {failures[h.ticker].reason === "not_found" ? "não encontrado" : "indisponível"}
+                      </span>
+                    ) : (
+                      "—"
+                    )}
                   </td>
                   <td className="px-4 py-3 text-right text-zinc-700 dark:text-zinc-300">
                     {h.currentValue !== null ? formatCurrency(h.currentValue, h.currency) : "—"}

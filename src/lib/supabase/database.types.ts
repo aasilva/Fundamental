@@ -81,12 +81,35 @@ export type Database = {
         }
         Relationships: []
       }
+      quote_lookup_failures: {
+        Row: {
+          detail: string | null
+          failed_at: string
+          reason: string
+          ticker: string
+        }
+        Insert: {
+          detail?: string | null
+          failed_at?: string
+          reason: string
+          ticker: string
+        }
+        Update: {
+          detail?: string | null
+          failed_at?: string
+          reason?: string
+          ticker?: string
+        }
+        Relationships: []
+      }
       quotes_cache: {
         Row: {
           currency: string
           fetched_at: string
           previous_close: number | null
           price: number
+          source: string
+          source_url: string | null
           ticker: string
         }
         Insert: {
@@ -94,6 +117,8 @@ export type Database = {
           fetched_at?: string
           previous_close?: number | null
           price: number
+          source?: string
+          source_url?: string | null
           ticker: string
         }
         Update: {
@@ -101,6 +126,8 @@ export type Database = {
           fetched_at?: string
           previous_close?: number | null
           price?: number
+          source?: string
+          source_url?: string | null
           ticker?: string
         }
         Relationships: []

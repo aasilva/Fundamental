@@ -2,12 +2,13 @@ import { timingSafeEqual } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { Resend } from "resend";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getQuotesForTickers } from "@/lib/quotes";
+import { getQuotes } from "@/lib/quotes";
 import { computePnl, summarizeByCurrency } from "@/lib/calculations";
 import { renderDailySummaryEmail } from "@/lib/email/daily-summary";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+// A pesquisa AI pode demorar dezenas de segundos por ticker.
+export const maxDuration = 300;
 
 const FROM_EMAIL = process.env.NOTIFICATIONS_FROM_EMAIL ?? "Fundamental <onboarding@resend.dev>";
 
@@ -53,7 +54,7 @@ export async function GET(request: NextRequest) {
   }
 
   // Uma só ronda de cotações para todos os utilizadores (poupa pedidos à Alpha Vantage).
-  const quotes = await getQuotesForTickers((allHoldings ?? []).map((h) => h.ticker));
+  const { quotes } = await getQuotes(allHoldings ?? []);
 
   const results: Array<{ user_id: string; status: string }> = [];
 

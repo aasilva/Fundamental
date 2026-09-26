@@ -2,9 +2,13 @@ import type { Tables } from "@/lib/supabase/database.types";
 
 export type Holding = Tables<"holdings">;
 
+type Quote = { price: number; fetchedAt: string; source?: string; sourceUrl?: string | null };
+
 export type HoldingWithPnl = Holding & {
   currentPrice: number | null;
   quoteFetchedAt: string | null;
+  quoteSource: string | null;
+  quoteSourceUrl: string | null;
   currentValue: number | null;
   costBasis: number;
   pnlAbs: number | null;
@@ -22,7 +26,7 @@ export type CurrencySummary = {
 
 export function computePnl(
   holding: Holding,
-  quote: { price: number; fetchedAt: string } | undefined,
+  quote: Quote | undefined,
 ): HoldingWithPnl {
   const costBasis = holding.quantity * holding.entry_price;
   const currentPrice = quote?.price ?? null;
@@ -34,6 +38,8 @@ export function computePnl(
     ...holding,
     currentPrice,
     quoteFetchedAt: quote?.fetchedAt ?? null,
+    quoteSource: quote?.source ?? null,
+    quoteSourceUrl: quote?.sourceUrl ?? null,
     currentValue,
     costBasis,
     pnlAbs,
