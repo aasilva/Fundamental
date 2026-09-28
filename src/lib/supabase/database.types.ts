@@ -120,6 +120,84 @@ export type Database = {
         }
         Relationships: []
       }
+      stock_analyses: {
+        Row: {
+          company_key: string
+          company_name: string | null
+          completed_at: string | null
+          created_at: string
+          effort: string | null
+          error: string | null
+          id: string
+          isin: string | null
+          locked_until: string | null
+          metrics: Json | null
+          model: string | null
+          previous_analysis_id: string | null
+          report_markdown: string | null
+          requested_at: string
+          run_state: Json | null
+          sections: Json | null
+          sources: Json | null
+          status: string
+          ticker: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          company_name?: string | null
+          completed_at?: string | null
+          created_at?: string
+          effort?: string | null
+          error?: string | null
+          id?: string
+          isin?: string | null
+          locked_until?: string | null
+          metrics?: Json | null
+          model?: string | null
+          previous_analysis_id?: string | null
+          report_markdown?: string | null
+          requested_at?: string
+          run_state?: Json | null
+          sections?: Json | null
+          sources?: Json | null
+          status?: string
+          ticker: string
+          updated_at?: string
+          user_id?: string
+        }
+        Update: {
+          company_name?: string | null
+          completed_at?: string | null
+          created_at?: string
+          effort?: string | null
+          error?: string | null
+          id?: string
+          isin?: string | null
+          locked_until?: string | null
+          metrics?: Json | null
+          model?: string | null
+          previous_analysis_id?: string | null
+          report_markdown?: string | null
+          requested_at?: string
+          run_state?: Json | null
+          sections?: Json | null
+          sources?: Json | null
+          status?: string
+          ticker?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stock_analyses_previous_analysis_id_fkey"
+            columns: ["previous_analysis_id"]
+            isOneToOne: false
+            referencedRelation: "stock_analyses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_settings: {
         Row: {
           alert_threshold_pct: number
@@ -155,6 +233,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      claim_analysis: {
+        Args: { p_claim_seconds: number; p_id: string }
+        Returns: boolean
+      }
       claim_quote_refresh: {
         Args: { p_claim_seconds: number; p_tickers: string[] }
         Returns: string[]

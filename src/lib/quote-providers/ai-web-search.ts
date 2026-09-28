@@ -1,5 +1,6 @@
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
+import { hostname } from "@/lib/hostname";
 import type { ProviderResult, QuoteProvider, QuoteRequest } from "./types";
 
 const MODEL = process.env.QUOTE_AI_MODEL ?? "claude-opus-5";
@@ -44,14 +45,6 @@ export type ReportedQuote = {
   source_url: string;
   exchange: string;
 };
-
-function hostname(url: string) {
-  try {
-    return new URL(url).hostname.replace(/^www\./, "");
-  } catch {
-    return null;
-  }
-}
 
 function collectSearchResultHosts(content: Anthropic.Beta.BetaContentBlock[], hosts: Set<string>) {
   for (const block of content) {

@@ -42,6 +42,12 @@ export default async function RootLayout({
             </span>
             <div className="flex items-center gap-4">
               <Link
+                href="/analysis"
+                className="text-sm text-zinc-500 hover:underline dark:text-zinc-400"
+              >
+                Análises
+              </Link>
+              <Link
                 href="/settings"
                 className="text-sm text-zinc-500 hover:underline dark:text-zinc-400"
               >

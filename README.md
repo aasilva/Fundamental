@@ -13,7 +13,9 @@ Stack: **Next.js 16 (App Router)** + **Supabase** (PostgreSQL, Auth, RLS) +
 - Cotações atuais via Alpha Vantage, com cache em base de dados
 - Valor atual e lucro/prejuízo (absoluto e %) por posição e totais **por moeda**
 - Resumo diário por email + alerta quando a variação da carteira ultrapassa um limite definido pelo utilizador
-- Row Level Security: cada utilizador só vê e edita as suas próprias posições
+- **Análise fundamental profunda de ações** (ticker, nome ou ISIN) por um agente com pesquisa web,
+  guardada e comparada automaticamente com análises anteriores à mesma empresa
+- Row Level Security: cada utilizador só vê e edita as suas próprias posições/análises
 
 ## Configuração local
 
@@ -88,6 +90,40 @@ chave de https://console.anthropic.com.
 - Usa o fallback do servidor da Anthropic (`fallbacks: "default"`): se o
   modelo recusar o pedido, a API tenta outro modelo automaticamente.
 
+### 3.1 Análise fundamental de ações (agente com pesquisa web)
+
+Em `/analysis`, pedes uma análise profunda de uma ação (ticker, nome e/ou
+ISIN); um agente Claude com pesquisa web produz um relatório em 17 secções
+(apresentação, estrutura acionista, EBITDA/EV-EBITDA, PER, margens, ROIC/ROCE,
+dívida, dividendos, riscos, concorrência, tese de investimento, conclusão,
+etc.) e guarda-o. Ao pedires uma nova análise à mesma empresa, as anteriores
+são dadas ao agente como contexto, e ele descreve explicitamente o que mudou.
+
+- **Requer** `ANTHROPIC_API_KEY` (a mesma da pesquisa AI de cotações, acima).
+  Sem ela configurada, o formulário em `/analysis` continua visível mas as
+  análises pedidas ficam em erro.
+- **Demora minutos, não segundos.** O agente pesquisa extensivamente antes de
+  escrever cada secção. Corre em segundo plano (o mesmo mecanismo `after()` já
+  usado nas cotações): podes fechar a página e voltar depois — o progresso é
+  guardado e retomado, mesmo que uma análise demore mais do que o limite de
+  execução de uma única invocação (`ANALYSIS_TIME_BUDGET_MS`, por defeito
+  ~260s, com margem face ao `maxDuration` de 300s da rota). Só uma análise de
+  cada vez por utilizador (protege contra custos acidentais).
+- **Custo**: bastante mais caro do que uma cotação — dezenas de pesquisas
+  (`ANALYSIS_MAX_SEARCHES`, 40 por defeito, a $10/1.000) mais um relatório
+  longo em tokens de saída. Conta uns **poucos dólares por análise** com
+  `claude-opus-5` a effort `high`. Ajusta `ANALYSIS_EFFORT` (`low` a `max`) e
+  `ANALYSIS_MAX_SEARCHES` para controlar profundidade vs. custo, e define um
+  limite de gastos em console.anthropic.com → Limits.
+- **Fiabilidade**: o agente é instruído a nunca inventar números — quando não
+  encontra ou não consegue calcular uma métrica, fica `null` (mostrado como
+  "—"), e o texto explica porquê. Mesmo assim, é conteúdo gerado por IA a
+  partir de pesquisa web: confirma sempre números críticos nas fontes listadas
+  no relatório antes de decidir.
+- Como nas cotações, usa `fallbacks: "default"` (se o modelo recusar, a API
+  tenta outro automaticamente) e uma reserva atómica (`claim_analysis`) para
+  que dois separadores abertos não paguem a mesma análise duas vezes.
+
 ### 4. Resend (emails)
 
 Cria conta em https://resend.com e gera uma API key em
@@ -115,7 +151,7 @@ npm run dev
 
 Abre http://localhost:3000 — deves ser redirecionado para `/login`.
 
-Testes unitários (cache de cotações, cadeia de fornecedores, validação AI, cálculos):
+Testes unitários (cache de cotações, cadeia de fornecedores, validação AI, cálculos, formatação das análises):
 
 ```bash
 npm test
@@ -191,7 +227,10 @@ Onde mexer nas alterações mais comuns:
 | Email diário (aspeto) | `src/lib/email/daily-summary.ts` |
 | Hora do email diário | `vercel.json` (cron em UTC) |
 | Piso do botão "Atualizar" (5 min) | `MANUAL_REFRESH_FLOOR_MINUTES` em `src/lib/quote-cache-policy.ts` |
-| Instruções dadas à pesquisa AI | `SYSTEM_PROMPT` em `src/lib/quote-providers/ai-web-search.ts` |
+| Instruções dadas à pesquisa AI (cotações) | `SYSTEM_PROMPT` em `src/lib/quote-providers/ai-web-search.ts` |
+| Persona/instruções do agente de análise, secções do relatório | `src/lib/analysis/prompt.ts` e `tool-schema.ts` |
+| Métricas mostradas na comparação entre análises | `METRIC_FIELDS` em `src/lib/analysis/tool-schema.ts` |
+| Profundidade/custo da análise (nº de pesquisas, effort) | variáveis `ANALYSIS_*` no `.env` |
 | Cores / estilos | classes Tailwind diretamente nos componentes |
 
 Alterações à **base de dados** (novas colunas/tabelas) precisam de SQL no
@@ -212,14 +251,16 @@ src/
     holdings/                 CRUD de posições (novo, editar, eliminar)
     settings/                 definições (intervalo das cotações, notificações)
     quotes/actions.ts         botão "Atualizar cotações"
+    analysis/                 lista+form, [id] relatório, company/[key] comparação
     api/cron/daily-summary/   endpoint chamado pelo cron
     page.tsx, loading.tsx     dashboard (lista + totais por moeda)
-  components/                 botões com estado pendente / confirmação
+  components/                 botões com estado pendente / confirmação, pollers
   lib/
     supabase/                 clientes Supabase (browser, server, admin, sessão)
     quote-providers/          Alpha Vantage, Finnhub e pesquisa AI (mesma interface)
     quote-cache-policy.ts     quando refrescar + cadeia de fornecedores (testado)
     quotes.ts                 cache de cotações e de falhas na base de dados
+    analysis/                 agente de análise fundamental (runner, prompt, schema, formatação)
     calculations.ts           P&L por posição e totais por moeda
     format.ts                 formatação de moeda/datas, moedas suportadas
     email/daily-summary.ts    template do email diário
@@ -235,3 +276,9 @@ supabase/migrations/          esquema da base de dados
 - O endpoint de cron exige `CRON_SECRET` (comparação em tempo constante) e
   fica fechado se a variável não estiver definida.
 - `/auth/confirm` só redireciona para caminhos relativos (sem open redirect).
+- Em `stock_analyses`, o utilizador só pode criar/ler/apagar as suas análises;
+  o estado e o conteúdo só são escritos pelo `service_role` (o agente), nunca
+  diretamente pelo utilizador.
+- O relatório da análise é renderizado com `react-markdown` (sem
+  `dangerouslySetInnerHTML`), porque o texto vem de pesquisa web e uma página
+  maliciosa poderia tentar injetar marcação.
