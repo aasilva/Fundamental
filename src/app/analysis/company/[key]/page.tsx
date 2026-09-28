@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { METRIC_FIELDS, formatMetricValue } from "@/lib/analysis/format";
 import type { AnalysisMetrics } from "@/lib/analysis/tool-schema";
 import { formatDate } from "@/lib/format";
+import { MetricLabel } from "@/components/metric-label";
 
 export default async function CompanyAnalysisHistoryPage({
   params,
@@ -56,7 +57,9 @@ export default async function CompanyAnalysisHistoryPage({
               if (!hasAny) return null;
               return (
                 <tr key={f.key} className="border-b border-black/5 last:border-0 dark:border-white/5">
-                  <td className="px-4 py-2 text-zinc-500 dark:text-zinc-400">{f.title}</td>
+                  <td className="px-4 py-2 text-zinc-500 dark:text-zinc-400">
+                    <MetricLabel metricKey={f.key} title={f.title} />
+                  </td>
                   {rows.map((r) => {
                     const m = r.metrics as AnalysisMetrics | null;
                     return (

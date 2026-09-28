@@ -18,5 +18,6 @@ export async function refreshQuotesNow() {
   });
 
   revalidatePath("/");
-  redirect(`/?atualizadas=${refreshed.length}&em_curso=${refreshing.length}`);
+  revalidatePath("/holdings");
+  redirect(`/holdings?atualizadas=${refreshed.length}&em_curso=${refreshing.length}`);
 }

@@ -18,6 +18,9 @@ Stack: **Next.js 16 (App Router)** + **Supabase** (PostgreSQL, Auth, RLS) +
 - Resumo diário por email + alerta quando a variação da carteira ultrapassa um limite definido pelo utilizador
 - **Análise fundamental profunda de ações** (ticker, nome ou ISIN) por um agente com pesquisa web,
   guardada e comparada automaticamente com análises anteriores à mesma empresa
+- Página inicial com visão geral (totais, melhores/piores posições, pesos, análises recentes, termo do dia)
+- **Glossário financeiro** (`/glossary`): termos em inglês com equivalente em português, fórmula e
+  cenários "o mesmo número é bom aqui e mau ali"; as métricas das análises ligam para lá
 - Row Level Security: cada utilizador só vê e edita as suas próprias posições/análises
 
 ## Configuração local
@@ -234,7 +237,10 @@ Onde mexer nas alterações mais comuns:
 
 | Quero mudar… | Ficheiro |
 |---|---|
-| Textos, colunas e layout do dashboard | `src/app/page.tsx` |
+| Página inicial (visão geral) | `src/app/page.tsx` |
+| Listagem de ações (tabela, colunas) | `src/app/holdings/page.tsx` |
+| Itens do menu | `ITEMS` em `src/components/main-nav.tsx` |
+| Termos do glossário (acrescentar/editar) | `GLOSSARY` em `src/lib/glossary.ts` |
 | Campos do formulário de ações | `src/app/holdings/holding-form.tsx` + validação em `src/app/holdings/actions.ts` |
 | Moedas disponíveis | `SUPPORTED_CURRENCIES` em `src/lib/format.ts` |
 | Página de definições | `src/app/settings/page.tsx` + `actions.ts` |

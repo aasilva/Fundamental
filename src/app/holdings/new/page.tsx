@@ -11,8 +11,8 @@ export default async function NewHoldingPage({
 
   return (
     <div className="mx-auto w-full max-w-lg px-4 py-10">
-      <Link href="/" className="text-sm text-zinc-500 hover:underline dark:text-zinc-400">
-        ← Voltar
+      <Link href="/holdings" className="text-sm text-zinc-500 hover:underline dark:text-zinc-400">
+        ← As minhas ações
       </Link>
       <h1 className="mt-2 text-2xl font-semibold text-zinc-950 dark:text-zinc-50">
         Adicionar ação

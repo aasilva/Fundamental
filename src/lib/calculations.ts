@@ -102,6 +102,13 @@ export function historicalRateKey(date: string, currency: string) {
   return `${date}|${currency}`;
 }
 
+// Valor atual da posição em euros (ao custo se não houver cotação); null se faltar o câmbio.
+export function valueInEur(h: HoldingWithPnl, rates: EurRates): number | null {
+  const rate = h.currency === "EUR" ? 1 : rates.latest[h.currency];
+  if (rate === undefined) return null;
+  return (h.currentValue ?? h.costBasis) * rate;
+}
+
 /**
  * Total da carteira em euros: valor atual ao câmbio de hoje, custo ao câmbio da data de compra.
  * valor − custo = (valor − custo em moeda local) × câmbio de hoje   ← variação das ações

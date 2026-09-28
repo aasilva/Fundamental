@@ -4,6 +4,7 @@ import "./globals.css";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { logout } from "./login/actions";
+import { MainNav } from "@/components/main-nav";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -36,24 +37,15 @@ export default async function RootLayout({
     >
       <body className="min-h-full flex flex-col bg-zinc-50 dark:bg-black">
         {user ? (
-          <header className="flex items-center justify-between border-b border-black/10 bg-white px-6 py-3 dark:border-white/10 dark:bg-zinc-950">
-            <span className="font-semibold text-zinc-950 dark:text-zinc-50">
-              Fundamental
-            </span>
+          <header className="flex flex-wrap items-center justify-between gap-3 border-b border-black/10 bg-white px-4 py-3 sm:px-6 dark:border-white/10 dark:bg-zinc-950">
+            <div className="flex flex-wrap items-center gap-4">
+              <Link href="/" className="font-semibold text-zinc-950 dark:text-zinc-50">
+                Fundamental
+              </Link>
+              <MainNav />
+            </div>
             <div className="flex items-center gap-4">
-              <Link
-                href="/analysis"
-                className="text-sm text-zinc-500 hover:underline dark:text-zinc-400"
-              >
-                Análises
-              </Link>
-              <Link
-                href="/settings"
-                className="text-sm text-zinc-500 hover:underline dark:text-zinc-400"
-              >
-                Definições
-              </Link>
-              <span className="text-sm text-zinc-500 dark:text-zinc-400">
+              <span className="hidden text-sm text-zinc-500 md:inline dark:text-zinc-400">
                 {user.email}
               </span>
               <form action={logout}>

@@ -10,6 +10,7 @@ import { importSourceLabel } from "@/lib/analysis/import";
 import { AnalysisStatusBadge } from "@/components/analysis-status-badge";
 import { AnalysisPoller } from "@/components/analysis-poller";
 import { MarkdownReport } from "@/components/markdown-report";
+import { MetricLabel } from "@/components/metric-label";
 import { SubmitButton } from "@/components/submit-button";
 import { retryAnalysis } from "../actions";
 
@@ -128,7 +129,9 @@ export default async function AnalysisDetailPage({
                 <tbody>
                   {METRIC_FIELDS.filter((f) => metrics[f.key] !== null).map((f) => (
                     <tr key={f.key} className="border-b border-black/5 last:border-0 dark:border-white/5">
-                      <td className="px-4 py-2 text-zinc-500 dark:text-zinc-400">{f.title}</td>
+                      <td className="px-4 py-2 text-zinc-500 dark:text-zinc-400">
+                        <MetricLabel metricKey={f.key} title={f.title} />
+                      </td>
                       <td className="px-4 py-2 text-right font-medium text-zinc-950 dark:text-zinc-50">
                         {formatMetricValue(metrics[f.key], f.unit, metrics.currency)}
                       </td>

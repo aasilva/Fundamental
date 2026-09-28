@@ -67,7 +67,8 @@ export async function createHolding(formData: FormData) {
   }
 
   revalidatePath("/");
-  redirect("/");
+  revalidatePath("/holdings");
+  redirect("/holdings");
 }
 
 export async function updateHolding(id: string, formData: FormData) {
@@ -89,7 +90,8 @@ export async function updateHolding(id: string, formData: FormData) {
   }
 
   revalidatePath("/");
-  redirect("/");
+  revalidatePath("/holdings");
+  redirect("/holdings");
 }
 
 export async function deleteHolding(formData: FormData) {
@@ -97,4 +99,5 @@ export async function deleteHolding(formData: FormData) {
   const supabase = await createClient();
   await supabase.from("holdings").delete().eq("id", id);
   revalidatePath("/");
+  revalidatePath("/holdings");
 }

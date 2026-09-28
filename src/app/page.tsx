@@ -1,283 +1,208 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { getQuotes } from "@/lib/quotes";
-import { automaticPolicy, MANUAL_REFRESH_FLOOR_MINUTES } from "@/lib/quote-cache-policy";
-import { computePnl, summarizeByCurrency, summarizeInEur } from "@/lib/calculations";
-import { getEurRates } from "@/lib/fx";
-import { formatCurrency, formatDate, formatDateTime, formatPct } from "@/lib/format";
-import { DeleteHoldingButton } from "@/components/delete-holding-button";
+import { loadPortfolio } from "@/lib/portfolio";
+import { termOfTheDay } from "@/lib/glossary";
+import { formatCurrency, formatDateTime, formatPct, pnlColor } from "@/lib/format";
+import { EurTotalCards } from "@/components/portfolio-totals";
 import { QuoteRefreshPoller } from "@/components/quote-refresh-poller";
-import { RefreshQuotesButton } from "@/components/refresh-quotes-button";
-import { deleteHolding } from "./holdings/actions";
-import { refreshQuotesNow } from "./quotes/actions";
+import { AnalysisStatusBadge } from "@/components/analysis-status-badge";
 
-function pnlColor(value: number) {
-  if (value > 0) return "text-emerald-600 dark:text-emerald-400";
-  if (value < 0) return "text-red-600 dark:text-red-400";
-  return "text-zinc-500 dark:text-zinc-400";
-}
-
-// A atualização em segundo plano (after) e o botão "Atualizar" correm dentro deste limite;
-// a pesquisa AI pode demorar dezenas de segundos.
+// A atualização das cotações em segundo plano (after) corre dentro deste limite.
 export const maxDuration = 300;
 
-const cardClass =
-  "rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-zinc-950";
+const TOP_POSITIONS = 6;
+const RECENT_ANALYSES = 4;
 
-export default async function DashboardPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ atualizadas?: string; em_curso?: string }>;
-}) {
-  const params = await searchParams;
+const panelClass = "rounded-xl border border-black/10 bg-white p-5 dark:border-white/10 dark:bg-zinc-950";
+const panelTitleClass = "text-sm font-semibold text-zinc-950 dark:text-zinc-50";
+const linkClass = "text-sm text-zinc-500 hover:text-zinc-950 hover:underline dark:text-zinc-400 dark:hover:text-zinc-50";
+
+function StatTile({ label, value, hint, valueClass }: { label: string; value: string; hint?: string; valueClass?: string }) {
+  return (
+    <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-zinc-950">
+      <p className="text-xs text-zinc-500 dark:text-zinc-400">{label}</p>
+      <p className={`mt-1 truncate text-lg font-semibold ${valueClass ?? "text-zinc-950 dark:text-zinc-50"}`}>{value}</p>
+      {hint ? <p className="truncate text-xs text-zinc-500 dark:text-zinc-400">{hint}</p> : null}
+    </div>
+  );
+}
+
+export default async function HomePage() {
   const supabase = await createClient();
-
-  const [{ data: holdings }, { data: settings }] = await Promise.all([
-    supabase.from("holdings").select("*").order("entry_date", { ascending: false }),
-    supabase.from("user_settings").select("quote_refresh_minutes").maybeSingle(),
+  const [portfolio, { data: analyses, count: analysisCount }, { count: activeAnalyses }] = await Promise.all([
+    loadPortfolio(),
+    supabase
+      .from("stock_analyses")
+      .select("id, ticker, company_name, status, requested_at, sections", { count: "exact" })
+      .order("requested_at", { ascending: false })
+      .limit(RECENT_ANALYSES),
+    supabase
+      .from("stock_analyses")
+      .select("id", { count: "exact", head: true })
+      .in("status", ["pending", "running"]),
   ]);
 
-  const rows = holdings ?? [];
-  const refreshMinutes = settings?.quote_refresh_minutes ?? 60;
-  // Nunca espera pelas APIs: mostra a cache e atualiza o que estiver desatualizado em segundo plano.
-  const [{ quotes, failures, refreshing }, eurRates] = await Promise.all([
-    getQuotes(rows, { policy: automaticPolicy(refreshMinutes), mode: "background" }),
-    getEurRates(rows),
-  ]);
-
-  const withPnl = rows.map((h) => computePnl(h, quotes[h.ticker]));
-  const summaries = summarizeByCurrency(withPnl);
-  const hasForeign = rows.some((h) => h.currency !== "EUR");
-  const eurTotal = hasForeign ? summarizeInEur(withPnl, eurRates) : null;
-  const foreignCurrencies = [...new Set(rows.map((h) => h.currency).filter((c) => c !== "EUR"))];
-  const missingQuotes = withPnl.filter((h) => h.currentPrice === null).length;
-  const oldestQuote = withPnl
-    .map((h) => h.quoteFetchedAt)
-    .filter((d): d is string => d !== null)
-    .sort()[0];
+  const { positions, eurTotal, eurRates, refreshing } = portfolio;
+  const foreignCurrencies = [...new Set(positions.map((p) => p.currency).filter((c) => c !== "EUR"))];
+  const ranked = positions.filter((p) => p.pnlPct !== null).sort((a, b) => b.pnlPct! - a.pnlPct!);
+  const best = ranked[0];
+  const worst = ranked.length > 1 ? ranked[ranked.length - 1] : undefined;
+  const topPositions = [...positions].sort((a, b) => (b.eurValue ?? 0) - (a.eurValue ?? 0)).slice(0, TOP_POSITIONS);
+  const term = termOfTheDay();
 
   return (
     <div className="mx-auto w-full max-w-5xl px-4 py-10">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <h1 className="text-2xl font-semibold text-zinc-950 dark:text-zinc-50">
-          A minha carteira
-        </h1>
-        <div className="flex flex-wrap gap-2">
-          {rows.length > 0 ? (
-            <form action={refreshQuotesNow}>
-              <RefreshQuotesButton />
-            </form>
-          ) : null}
-          <Link
-            href="/holdings/new"
-            className="rounded-md bg-zinc-950 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-950 dark:hover:bg-zinc-200"
-          >
-            + Adicionar ação
-          </Link>
-        </div>
-      </div>
-
-      {params.atualizadas !== undefined ? (
-        <p className="mt-4 rounded-md bg-zinc-100 px-3 py-2 text-sm text-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
-          {Number(params.atualizadas) > 0
-            ? `${params.atualizadas} cotação(ões) atualizada(s).`
-            : `As cotações já estavam atualizadas (o botão só volta a pedir cada ticker ao fim de ${MANUAL_REFRESH_FLOOR_MINUTES} minutos).`}
-          {Number(params.em_curso) > 0 ? ` ${params.em_curso} ainda em atualização noutro pedido.` : ""}
-        </p>
-      ) : null}
+      <h1 className="text-2xl font-semibold text-zinc-950 dark:text-zinc-50">Visão geral</h1>
 
       <QuoteRefreshPoller count={refreshing.length} />
 
-      {eurTotal ? (
-        <div className="mt-6">
-          <h2 className="mb-2 text-sm font-medium text-zinc-500 dark:text-zinc-400">Total da carteira em euros</h2>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <div className={cardClass}>
-              <p className="text-sm text-zinc-500 dark:text-zinc-400">Valor atual</p>
-              <p className="mt-1 text-xl font-semibold text-zinc-950 dark:text-zinc-50">
-                {formatCurrency(eurTotal.totalValue, "EUR")}
-              </p>
-              <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">ao câmbio de hoje</p>
-            </div>
-            <div className={cardClass}>
-              <p className="text-sm text-zinc-500 dark:text-zinc-400">Custo total</p>
-              <p className="mt-1 text-xl font-semibold text-zinc-950 dark:text-zinc-50">
-                {formatCurrency(eurTotal.totalCost, "EUR")}
-              </p>
-              <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">ao câmbio de cada data de compra</p>
-            </div>
-            <div className={cardClass}>
-              <p className="text-sm text-zinc-500 dark:text-zinc-400">Lucro / Prejuízo</p>
-              <p className={`mt-1 text-xl font-semibold ${pnlColor(eurTotal.totalPnlAbs)}`}>
-                {formatCurrency(eurTotal.totalPnlAbs, "EUR")}{" "}
-                <span className="text-sm">({formatPct(eurTotal.totalPnlPct)})</span>
-              </p>
-              <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                ações {formatCurrency(eurTotal.pricePnl, "EUR")} · câmbio {formatCurrency(eurTotal.fxPnl, "EUR")}
-              </p>
-            </div>
-          </div>
-          <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
-            {foreignCurrencies
-              .filter((c) => eurRates.latest[c] !== undefined)
-              .map((c) => `1 ${c} = ${eurRates.latest[c].toLocaleString("pt-PT", { maximumFractionDigits: 4 })} €`)
-              .join(" · ")}
-            {eurRates.latestDate ? ` (taxas de referência de ${formatDate(eurRates.latestDate)})` : ""}
-            {eurTotal.excluded.length > 0
-              ? ` — sem câmbio disponível para ${eurTotal.excluded.join(", ")}, que fica(m) de fora deste total.`
-              : ""}
-          </p>
+      {positions.length === 0 ? (
+        <div className={`${panelClass} mt-6`}>
+          <p className={panelTitleClass}>Bem-vindo! Começa por aqui:</p>
+          <ul className="mt-3 space-y-2 text-sm text-zinc-700 dark:text-zinc-300">
+            <li>
+              <Link href="/holdings/new" className="font-medium underline">
+                Adicionar a primeira ação
+              </Link>{" "}
+              — para acompanhar cotações e lucros.
+            </li>
+            <li>
+              <Link href="/analysis" className="font-medium underline">
+                Analisar uma empresa
+              </Link>{" "}
+              — análise fundamental completa, guardada para comparares no futuro.
+            </li>
+            <li>
+              <Link href="/glossary" className="font-medium underline">
+                Ver o glossário
+              </Link>{" "}
+              — os termos financeiros explicados com exemplos.
+            </li>
+          </ul>
         </div>
-      ) : null}
-
-      {summaries.map((s) => (
-        <div key={s.currency} className="mt-6">
-          {summaries.length > 1 ? (
-            <h2 className="mb-2 text-sm font-medium text-zinc-500 dark:text-zinc-400">
-              Posições em {s.currency}
-            </h2>
-          ) : null}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <div className={cardClass}>
-              <p className="text-sm text-zinc-500 dark:text-zinc-400">Valor atual</p>
-              <p className="mt-1 text-xl font-semibold text-zinc-950 dark:text-zinc-50">
-                {formatCurrency(s.totalValue, s.currency)}
-              </p>
-            </div>
-            <div className={cardClass}>
-              <p className="text-sm text-zinc-500 dark:text-zinc-400">Custo total</p>
-              <p className="mt-1 text-xl font-semibold text-zinc-950 dark:text-zinc-50">
-                {formatCurrency(s.totalCost, s.currency)}
-              </p>
-            </div>
-            <div className={cardClass}>
-              <p className="text-sm text-zinc-500 dark:text-zinc-400">Lucro / Prejuízo</p>
-              <p className={`mt-1 text-xl font-semibold ${pnlColor(s.totalPnlAbs)}`}>
-                {formatCurrency(s.totalPnlAbs, s.currency)}{" "}
-                <span className="text-sm">({formatPct(s.totalPnlPct)})</span>
-              </p>
-            </div>
+      ) : (
+        <>
+          <div className="mt-6">
+            <EurTotalCards total={eurTotal} rates={eurRates} foreignCurrencies={foreignCurrencies} />
           </div>
-        </div>
-      ))}
 
-      {missingQuotes > 0 ? (
-        <p className="mt-4 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-950 dark:text-amber-200">
-          {missingQuotes === 1 ? "1 posição sem cotação" : `${missingQuotes} posições sem cotação`}{" "}
-          — nenhum fornecedor reconheceu o ticker ou os limites de pedidos foram atingidos. Estas
-          posições entram nos totais ao preço de custo; a pesquisa é repetida automaticamente mais
-          tarde.
-        </p>
-      ) : null}
-
-      <div className="mt-8 overflow-x-auto rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-zinc-950">
-        {rows.length === 0 ? (
-          <div className="p-10 text-center text-zinc-500 dark:text-zinc-400">
-            Ainda não tens ações registadas.{" "}
-            <Link href="/holdings/new" className="font-medium text-zinc-950 underline dark:text-zinc-50">
-              Adiciona a primeira
-            </Link>
-            .
+          <div className="mt-4 grid grid-cols-2 gap-4 lg:grid-cols-4">
+            <StatTile
+              label="Posições"
+              value={String(positions.length)}
+              hint={foreignCurrencies.length > 0 ? `em ${foreignCurrencies.length + 1} moedas` : "todas em euros"}
+            />
+            <StatTile
+              label="Melhor posição"
+              value={best ? formatPct(best.pnlPct!) : "—"}
+              hint={best?.ticker}
+              valueClass={best ? pnlColor(best.pnlPct!) : undefined}
+            />
+            <StatTile
+              label="Pior posição"
+              value={worst ? formatPct(worst.pnlPct!) : "—"}
+              hint={worst?.ticker}
+              valueClass={worst ? pnlColor(worst.pnlPct!) : undefined}
+            />
+            <StatTile
+              label="Análises"
+              value={String(analysisCount ?? 0)}
+              hint={activeAnalyses ? `${activeAnalyses} em curso` : undefined}
+            />
           </div>
-        ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-black/10 text-left text-zinc-500 dark:border-white/10 dark:text-zinc-400">
-                <th className="px-4 py-3 font-medium">Ticker</th>
-                <th className="px-4 py-3 font-medium">Data entrada</th>
-                <th className="px-4 py-3 font-medium text-right">Quantidade</th>
-                <th className="px-4 py-3 font-medium text-right">Preço entrada</th>
-                <th className="px-4 py-3 font-medium text-right">Cotação atual</th>
-                <th className="px-4 py-3 font-medium text-right">Valor atual</th>
-                <th className="px-4 py-3 font-medium text-right">Lucro / Prejuízo</th>
-                <th className="px-4 py-3 font-medium"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {withPnl.map((h) => (
-                <tr key={h.id} className="border-b border-black/5 last:border-0 dark:border-white/5">
-                  <td className="px-4 py-3">
-                    <div className="font-medium text-zinc-950 dark:text-zinc-50">{h.ticker}</div>
-                    {h.name ? (
-                      <div className="text-xs text-zinc-500 dark:text-zinc-400">{h.name}</div>
-                    ) : null}
-                  </td>
-                  <td className="px-4 py-3 text-zinc-700 dark:text-zinc-300">
-                    {formatDate(h.entry_date)}
-                  </td>
-                  <td className="px-4 py-3 text-right text-zinc-700 dark:text-zinc-300">
-                    {h.quantity}
-                  </td>
-                  <td className="px-4 py-3 text-right text-zinc-700 dark:text-zinc-300">
-                    {formatCurrency(h.entry_price, h.currency)}
-                  </td>
-                  <td className="px-4 py-3 text-right text-zinc-700 dark:text-zinc-300">
-                    {h.currentPrice !== null ? (
-                      <>
-                        {formatCurrency(h.currentPrice, h.currency)}
-                        {h.quoteSource === "ai_web_search" && h.quoteSourceUrl ? (
-                          <a
-                            href={h.quoteSourceUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            title="Cotação obtida por pesquisa AI — confirma na fonte"
-                            className="ml-1.5 rounded bg-violet-100 px-1 py-0.5 text-[10px] font-semibold text-violet-700 hover:underline dark:bg-violet-950 dark:text-violet-300"
-                          >
-                            AI
-                          </a>
-                        ) : null}
-                      </>
-                    ) : failures[h.ticker] ? (
-                      <span
-                        title={failures[h.ticker].detail ?? undefined}
-                        className="text-xs text-amber-700 dark:text-amber-400"
-                      >
-                        {failures[h.ticker].reason === "not_found" ? "não encontrado" : "indisponível"}
-                      </span>
-                    ) : (
-                      "—"
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-right text-zinc-700 dark:text-zinc-300">
-                    {h.currentValue !== null ? formatCurrency(h.currentValue, h.currency) : "—"}
-                  </td>
-                  <td className={`px-4 py-3 text-right font-medium ${h.pnlAbs !== null ? pnlColor(h.pnlAbs) : ""}`}>
-                    {h.pnlAbs !== null ? (
-                      <>
-                        {formatCurrency(h.pnlAbs, h.currency)}{" "}
-                        <span className="text-xs">({formatPct(h.pnlPct ?? 0)})</span>
-                      </>
-                    ) : (
-                      "—"
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <div className="flex justify-end gap-2">
-                      <Link
-                        href={`/holdings/${h.id}/edit`}
-                        className="rounded-md border border-zinc-300 px-2.5 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
-                      >
-                        Editar
-                      </Link>
-                      <form action={deleteHolding}>
-                        <input type="hidden" name="id" value={h.id} />
-                        <DeleteHoldingButton ticker={h.ticker} />
-                      </form>
+        </>
+      )}
+
+      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+        {positions.length > 0 ? (
+          <section className={panelClass}>
+            <div className="flex items-center justify-between gap-4">
+              <h2 className={panelTitleClass}>Maiores posições</h2>
+              <Link href="/holdings" className={linkClass}>
+                Ver todas ({positions.length}) →
+              </Link>
+            </div>
+            <ul className="mt-3 divide-y divide-black/5 dark:divide-white/5">
+              {topPositions.map((p) => (
+                <li key={p.id} className="py-2.5">
+                  <div className="flex items-baseline justify-between gap-3 text-sm">
+                    <div className="min-w-0">
+                      <span className="font-medium text-zinc-950 dark:text-zinc-50">{p.ticker}</span>
+                      {p.name ? <span className="ml-2 truncate text-zinc-500 dark:text-zinc-400">{p.name}</span> : null}
                     </div>
-                  </td>
-                </tr>
+                    <div className="shrink-0 text-right">
+                      <span className="text-zinc-700 dark:text-zinc-300">
+                        {p.eurValue !== null ? formatCurrency(p.eurValue, "EUR") : "—"}
+                      </span>
+                      <span className={`ml-3 inline-block w-16 font-medium ${p.pnlPct !== null ? pnlColor(p.pnlPct) : "text-zinc-400"}`}>
+                        {p.pnlPct !== null ? formatPct(p.pnlPct) : "—"}
+                      </span>
+                    </div>
+                  </div>
+                  {p.weightPct !== null ? (
+                    <div className="mt-1.5 flex items-center gap-2" title={`${p.weightPct.toFixed(1)}% da carteira`}>
+                      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
+                        <div className="h-full rounded-full bg-zinc-400 dark:bg-zinc-500" style={{ width: `${Math.min(p.weightPct, 100)}%` }} />
+                      </div>
+                      <span className="w-12 text-right text-xs text-zinc-500 dark:text-zinc-400">{p.weightPct.toFixed(1)}%</span>
+                    </div>
+                  ) : null}
+                </li>
               ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+            </ul>
+          </section>
+        ) : null}
 
-      {oldestQuote ? (
-        <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
-          Cotação mais antiga: {formatDateTime(oldestQuote)}. Atualização automática a cada{" "}
-          {refreshMinutes} min (<Link href="/settings" className="underline">alterar</Link>).
-        </p>
-      ) : null}
+        <section className={panelClass}>
+          <div className="flex items-center justify-between gap-4">
+            <h2 className={panelTitleClass}>Análises recentes</h2>
+            <Link href="/analysis" className={linkClass}>
+              {(analyses ?? []).length > 0 ? "Ver todas →" : "Fazer uma análise →"}
+            </Link>
+          </div>
+          {(analyses ?? []).length === 0 ? (
+            <p className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">
+              Ainda não analisaste nenhuma empresa. Podes pedir uma análise automática ou importar uma feita no
+              ChatGPT ou no Claude.
+            </p>
+          ) : (
+            <ul className="mt-3 divide-y divide-black/5 dark:divide-white/5">
+              {(analyses ?? []).map((a) => {
+                const summary = (a.sections as { resumo_executivo?: string } | null)?.resumo_executivo;
+                return (
+                  <li key={a.id} className="py-2.5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Link href={`/analysis/${a.id}`} className="text-sm font-medium text-zinc-950 hover:underline dark:text-zinc-50">
+                        {a.company_name || a.ticker}
+                      </Link>
+                      <AnalysisStatusBadge status={a.status} />
+                      <span className="text-xs text-zinc-500 dark:text-zinc-400">{formatDateTime(a.requested_at)}</span>
+                    </div>
+                    {summary ? (
+                      <p className="mt-1 line-clamp-2 text-sm text-zinc-600 dark:text-zinc-400">{summary}</p>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+
+        <section className={`${panelClass} ${positions.length > 0 ? "lg:col-span-2" : ""}`}>
+          <div className="flex items-center justify-between gap-4">
+            <h2 className={panelTitleClass}>Termo do dia</h2>
+            <Link href="/glossary" className={linkClass}>
+              Glossário →
+            </Link>
+          </div>
+          <Link href={`/glossary#${term.id}`} className="mt-3 block group">
+            <p className="font-medium text-zinc-950 group-hover:underline dark:text-zinc-50">
+              {term.en} <span className="font-normal text-zinc-500 dark:text-zinc-400">· {term.pt}</span>
+            </p>
+            <p className="mt-1 line-clamp-3 text-sm text-zinc-600 dark:text-zinc-400">{term.definition}</p>
+          </Link>
+        </section>
+      </div>
     </div>
   );
 }
