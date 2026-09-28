@@ -2,7 +2,8 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { getQuotes } from "@/lib/quotes";
 import { automaticPolicy, MANUAL_REFRESH_FLOOR_MINUTES } from "@/lib/quote-cache-policy";
-import { computePnl, summarizeByCurrency } from "@/lib/calculations";
+import { computePnl, summarizeByCurrency, summarizeInEur } from "@/lib/calculations";
+import { getEurRates } from "@/lib/fx";
 import { formatCurrency, formatDate, formatDateTime, formatPct } from "@/lib/format";
 import { DeleteHoldingButton } from "@/components/delete-holding-button";
 import { QuoteRefreshPoller } from "@/components/quote-refresh-poller";
@@ -39,13 +40,16 @@ export default async function DashboardPage({
   const rows = holdings ?? [];
   const refreshMinutes = settings?.quote_refresh_minutes ?? 60;
   // Nunca espera pelas APIs: mostra a cache e atualiza o que estiver desatualizado em segundo plano.
-  const { quotes, failures, refreshing } = await getQuotes(rows, {
-    policy: automaticPolicy(refreshMinutes),
-    mode: "background",
-  });
+  const [{ quotes, failures, refreshing }, eurRates] = await Promise.all([
+    getQuotes(rows, { policy: automaticPolicy(refreshMinutes), mode: "background" }),
+    getEurRates(rows),
+  ]);
 
   const withPnl = rows.map((h) => computePnl(h, quotes[h.ticker]));
   const summaries = summarizeByCurrency(withPnl);
+  const hasForeign = rows.some((h) => h.currency !== "EUR");
+  const eurTotal = hasForeign ? summarizeInEur(withPnl, eurRates) : null;
+  const foreignCurrencies = [...new Set(rows.map((h) => h.currency).filter((c) => c !== "EUR"))];
   const missingQuotes = withPnl.filter((h) => h.currentPrice === null).length;
   const oldestQuote = withPnl
     .map((h) => h.quoteFetchedAt)
@@ -83,6 +87,48 @@ export default async function DashboardPage({
       ) : null}
 
       <QuoteRefreshPoller count={refreshing.length} />
+
+      {eurTotal ? (
+        <div className="mt-6">
+          <h2 className="mb-2 text-sm font-medium text-zinc-500 dark:text-zinc-400">Total da carteira em euros</h2>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <div className={cardClass}>
+              <p className="text-sm text-zinc-500 dark:text-zinc-400">Valor atual</p>
+              <p className="mt-1 text-xl font-semibold text-zinc-950 dark:text-zinc-50">
+                {formatCurrency(eurTotal.totalValue, "EUR")}
+              </p>
+              <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">ao câmbio de hoje</p>
+            </div>
+            <div className={cardClass}>
+              <p className="text-sm text-zinc-500 dark:text-zinc-400">Custo total</p>
+              <p className="mt-1 text-xl font-semibold text-zinc-950 dark:text-zinc-50">
+                {formatCurrency(eurTotal.totalCost, "EUR")}
+              </p>
+              <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">ao câmbio de cada data de compra</p>
+            </div>
+            <div className={cardClass}>
+              <p className="text-sm text-zinc-500 dark:text-zinc-400">Lucro / Prejuízo</p>
+              <p className={`mt-1 text-xl font-semibold ${pnlColor(eurTotal.totalPnlAbs)}`}>
+                {formatCurrency(eurTotal.totalPnlAbs, "EUR")}{" "}
+                <span className="text-sm">({formatPct(eurTotal.totalPnlPct)})</span>
+              </p>
+              <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                ações {formatCurrency(eurTotal.pricePnl, "EUR")} · câmbio {formatCurrency(eurTotal.fxPnl, "EUR")}
+              </p>
+            </div>
+          </div>
+          <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+            {foreignCurrencies
+              .filter((c) => eurRates.latest[c] !== undefined)
+              .map((c) => `1 ${c} = ${eurRates.latest[c].toLocaleString("pt-PT", { maximumFractionDigits: 4 })} €`)
+              .join(" · ")}
+            {eurRates.latestDate ? ` (taxas de referência de ${formatDate(eurRates.latestDate)})` : ""}
+            {eurTotal.excluded.length > 0
+              ? ` — sem câmbio disponível para ${eurTotal.excluded.join(", ")}, que fica(m) de fora deste total.`
+              : ""}
+          </p>
+        </div>
+      ) : null}
 
       {summaries.map((s) => (
         <div key={s.currency} className="mt-6">

@@ -78,3 +78,66 @@ export function summarizeByCurrency(holdings: HoldingWithPnl[]): CurrencySummary
     };
   });
 }
+
+// Quantos EUR vale 1 unidade de cada moeda: câmbio de hoje por moeda, e câmbio da data de
+// compra por "AAAA-MM-DD|MOEDA". EUR não precisa de estar nas tabelas (vale sempre 1).
+export type EurRates = {
+  latest: Record<string, number>;
+  historical: Record<string, number>;
+};
+
+export type EurSummary = {
+  totalValue: number;
+  totalCost: number;
+  totalPnlAbs: number;
+  totalPnlPct: number;
+  // Parte do lucro/prejuízo que vem da variação das ações, e parte que vem do câmbio.
+  pricePnl: number;
+  fxPnl: number;
+  // Posições que ficaram de fora por falta de câmbio.
+  excluded: string[];
+};
+
+export function historicalRateKey(date: string, currency: string) {
+  return `${date}|${currency}`;
+}
+
+/**
+ * Total da carteira em euros: valor atual ao câmbio de hoje, custo ao câmbio da data de compra.
+ * valor − custo = (valor − custo em moeda local) × câmbio de hoje   ← variação das ações
+ *               + custo em moeda local × (câmbio de hoje − câmbio da compra)   ← efeito cambial
+ */
+export function summarizeInEur(holdings: HoldingWithPnl[], rates: EurRates): EurSummary {
+  let totalValue = 0;
+  let totalCost = 0;
+  let pricePnl = 0;
+  let fxPnl = 0;
+  const excluded: string[] = [];
+
+  for (const h of holdings) {
+    const isEur = h.currency === "EUR";
+    const latest = isEur ? 1 : rates.latest[h.currency];
+    const atPurchase = isEur ? 1 : rates.historical[historicalRateKey(h.entry_date, h.currency)];
+    if (latest === undefined || atPurchase === undefined) {
+      excluded.push(h.ticker);
+      continue;
+    }
+    // Sem cotação, a posição entra ao custo (como nos totais por moeda): só sobra o efeito cambial.
+    const localValue = h.currentValue ?? h.costBasis;
+    totalValue += localValue * latest;
+    totalCost += h.costBasis * atPurchase;
+    pricePnl += (localValue - h.costBasis) * latest;
+    fxPnl += h.costBasis * (latest - atPurchase);
+  }
+
+  const totalPnlAbs = totalValue - totalCost;
+  return {
+    totalValue,
+    totalCost,
+    totalPnlAbs,
+    totalPnlPct: totalCost > 0 ? (totalPnlAbs / totalCost) * 100 : 0,
+    pricePnl,
+    fxPnl,
+    excluded,
+  };
+}

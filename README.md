@@ -12,6 +12,9 @@ Stack: **Next.js 16 (App Router)** + **Supabase** (PostgreSQL, Auth, RLS) +
 - CRUD de posições: ticker, quantidade, preço/data de entrada, moeda, notas
 - Cotações atuais via Alpha Vantage, com cache em base de dados
 - Valor atual e lucro/prejuízo (absoluto e %) por posição e totais **por moeda**
+- **Total da carteira em euros**: valor ao câmbio de hoje, custo ao câmbio da data de compra, e o
+  lucro/prejuízo separado entre variação das ações e efeito cambial. Câmbios da API gratuita
+  [Frankfurter](https://frankfurter.dev) (sem chave), em cache na base de dados (`src/lib/fx.ts`)
 - Resumo diário por email + alerta quando a variação da carteira ultrapassa um limite definido pelo utilizador
 - **Análise fundamental profunda de ações** (ticker, nome ou ISIN) por um agente com pesquisa web,
   guardada e comparada automaticamente com análises anteriores à mesma empresa

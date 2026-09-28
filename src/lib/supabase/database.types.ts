@@ -12,6 +12,51 @@ export type Database = {
   }
   public: {
     Tables: {
+      fx_rates_historical: {
+        Row: {
+          currency: string
+          eur_rate: number
+          fetched_at: string
+          rate_date: string
+          source_date: string
+        }
+        Insert: {
+          currency: string
+          eur_rate: number
+          fetched_at?: string
+          rate_date: string
+          source_date: string
+        }
+        Update: {
+          currency?: string
+          eur_rate?: number
+          fetched_at?: string
+          rate_date?: string
+          source_date?: string
+        }
+        Relationships: []
+      }
+      fx_rates_latest: {
+        Row: {
+          currency: string
+          eur_rate: number
+          fetched_at: string
+          rate_date: string
+        }
+        Insert: {
+          currency: string
+          eur_rate: number
+          fetched_at?: string
+          rate_date: string
+        }
+        Update: {
+          currency?: string
+          eur_rate?: number
+          fetched_at?: string
+          rate_date?: string
+        }
+        Relationships: []
+      }
       holdings: {
         Row: {
           created_at: string
