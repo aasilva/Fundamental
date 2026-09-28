@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { runProviderChain, shouldRefresh } from "./quote-cache-policy";
+import { automaticPolicy, MANUAL_POLICY, runProviderChain, shouldRefresh } from "./quote-cache-policy";
 import type { ProviderResult, QuoteProvider } from "./quote-providers/types";
 
 const config = { ttlMinutes: 60, aiTtlMinutes: 360, notFoundRetryMinutes: 1440, unavailableRetryMinutes: 60 };
@@ -35,6 +35,36 @@ describe("shouldRefresh", () => {
   it("keeps showing a stale quote without refetching while a recent failure is recorded", () => {
     const stale = { source: "alpha_vantage", fetched_at: minutesAgo(300) };
     assert.equal(shouldRefresh(stale, { reason: "unavailable", failed_at: minutesAgo(10) }, NOW, config), false);
+  });
+});
+
+describe("automaticPolicy", () => {
+  it("uses the user's interval for normal quotes", () => {
+    const policy = automaticPolicy(15);
+    assert.equal(shouldRefresh({ source: "finnhub", fetched_at: minutesAgo(10) }, undefined, NOW, policy), false);
+    assert.equal(shouldRefresh({ source: "finnhub", fetched_at: minutesAgo(20) }, undefined, NOW, policy), true);
+  });
+
+  it("never refreshes AI quotes automatically more often than the AI minimum", () => {
+    const policy = automaticPolicy(15);
+    assert.equal(policy.aiTtlMinutes, 360);
+    assert.equal(shouldRefresh({ source: "ai_web_search", fetched_at: minutesAgo(120) }, undefined, NOW, policy), false);
+  });
+
+  it("respects a user interval longer than the AI minimum", () => {
+    assert.equal(automaticPolicy(720).aiTtlMinutes, 720);
+  });
+});
+
+describe("MANUAL_POLICY (refresh button)", () => {
+  it("refreshes anything older than 5 minutes, including AI quotes and recorded failures", () => {
+    assert.equal(shouldRefresh({ source: "ai_web_search", fetched_at: minutesAgo(6) }, undefined, NOW, MANUAL_POLICY), true);
+    assert.equal(shouldRefresh(undefined, { reason: "not_found", failed_at: minutesAgo(6) }, NOW, MANUAL_POLICY), true);
+  });
+
+  it("ignores repeated clicks within 5 minutes", () => {
+    assert.equal(shouldRefresh({ source: "alpha_vantage", fetched_at: minutesAgo(2) }, undefined, NOW, MANUAL_POLICY), false);
+    assert.equal(shouldRefresh(undefined, { reason: "unavailable", failed_at: minutesAgo(2) }, NOW, MANUAL_POLICY), false);
   });
 });
 

@@ -8,7 +8,7 @@ export default function Loading() {
         ))}
       </div>
       <div className="mt-8 h-64 animate-pulse rounded-xl bg-zinc-200 dark:bg-zinc-800" />
-      <p className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">A atualizar cotações…</p>
+      <p className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">A carregar…</p>
     </div>
   );
 }

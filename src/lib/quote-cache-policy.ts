@@ -2,12 +2,34 @@ import type { ProviderResult, QuoteProvider, QuoteRequest } from "./quote-provid
 
 const MINUTE = 60_000;
 
-export const cacheConfig = {
-  ttlMinutes: Number(process.env.QUOTE_CACHE_TTL_MINUTES ?? 60),
-  // Cotações por pesquisa AI custam mais: guardam-se durante mais tempo.
-  aiTtlMinutes: Number(process.env.QUOTE_AI_CACHE_TTL_MINUTES ?? 360),
-  notFoundRetryMinutes: Number(process.env.QUOTE_NOT_FOUND_RETRY_HOURS ?? 24) * 60,
-  unavailableRetryMinutes: Number(process.env.QUOTE_UNAVAILABLE_RETRY_MINUTES ?? 60),
+export type RefreshPolicy = {
+  ttlMinutes: number;
+  aiTtlMinutes: number;
+  notFoundRetryMinutes: number;
+  unavailableRetryMinutes: number;
+};
+
+export const DEFAULT_REFRESH_MINUTES = 60;
+// Botão "Atualizar": ignora o intervalo configurado, mas nunca repete um ticker
+// tratado há menos de 5 min (cliques repetidos não gastam pedidos às APIs).
+export const MANUAL_REFRESH_FLOOR_MINUTES = 5;
+
+// Atualização automática, com o intervalo escolhido pelo utilizador nas definições.
+export function automaticPolicy(userRefreshMinutes = DEFAULT_REFRESH_MINUTES): RefreshPolicy {
+  return {
+    ttlMinutes: userRefreshMinutes,
+    // Cotações por pesquisa AI custam dinheiro: automaticamente, nunca mais que o mínimo configurado.
+    aiTtlMinutes: Math.max(userRefreshMinutes, Number(process.env.QUOTE_AI_CACHE_TTL_MINUTES ?? 360)),
+    notFoundRetryMinutes: Number(process.env.QUOTE_NOT_FOUND_RETRY_HOURS ?? 24) * 60,
+    unavailableRetryMinutes: Number(process.env.QUOTE_UNAVAILABLE_RETRY_MINUTES ?? 60),
+  };
+}
+
+export const MANUAL_POLICY: RefreshPolicy = {
+  ttlMinutes: MANUAL_REFRESH_FLOOR_MINUTES,
+  aiTtlMinutes: MANUAL_REFRESH_FLOOR_MINUTES,
+  notFoundRetryMinutes: MANUAL_REFRESH_FLOOR_MINUTES,
+  unavailableRetryMinutes: MANUAL_REFRESH_FLOOR_MINUTES,
 };
 
 type CachedQuote = { source: string; fetched_at: string };
@@ -17,7 +39,7 @@ export function shouldRefresh(
   cached: CachedQuote | undefined,
   failure: LookupFailure | undefined,
   now: number,
-  config = cacheConfig,
+  config: RefreshPolicy,
 ) {
   if (cached) {
     const ttl = cached.source === "ai_web_search" ? config.aiTtlMinutes : config.ttlMinutes;

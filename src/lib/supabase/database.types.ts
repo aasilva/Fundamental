@@ -54,33 +54,6 @@ export type Database = {
         }
         Relationships: []
       }
-      notification_settings: {
-        Row: {
-          alert_threshold_pct: number
-          created_at: string
-          daily_summary_enabled: boolean
-          last_notified_at: string | null
-          updated_at: string
-          user_id: string
-        }
-        Insert: {
-          alert_threshold_pct?: number
-          created_at?: string
-          daily_summary_enabled?: boolean
-          last_notified_at?: string | null
-          updated_at?: string
-          user_id: string
-        }
-        Update: {
-          alert_threshold_pct?: number
-          created_at?: string
-          daily_summary_enabled?: boolean
-          last_notified_at?: string | null
-          updated_at?: string
-          user_id?: string
-        }
-        Relationships: []
-      }
       quote_lookup_failures: {
         Row: {
           detail: string | null
@@ -98,6 +71,21 @@ export type Database = {
           detail?: string | null
           failed_at?: string
           reason?: string
+          ticker?: string
+        }
+        Relationships: []
+      }
+      quote_refresh_claims: {
+        Row: {
+          claimed_at: string
+          ticker: string
+        }
+        Insert: {
+          claimed_at?: string
+          ticker: string
+        }
+        Update: {
+          claimed_at?: string
           ticker?: string
         }
         Relationships: []
@@ -132,12 +120,45 @@ export type Database = {
         }
         Relationships: []
       }
+      user_settings: {
+        Row: {
+          alert_threshold_pct: number
+          created_at: string
+          daily_summary_enabled: boolean
+          last_notified_at: string | null
+          quote_refresh_minutes: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          alert_threshold_pct?: number
+          created_at?: string
+          daily_summary_enabled?: boolean
+          last_notified_at?: string | null
+          quote_refresh_minutes?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          alert_threshold_pct?: number
+          created_at?: string
+          daily_summary_enabled?: boolean
+          last_notified_at?: string | null
+          quote_refresh_minutes?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      claim_quote_refresh: {
+        Args: { p_claim_seconds: number; p_tickers: string[] }
+        Returns: string[]
+      }
     }
     Enums: {
       [_ in never]: never

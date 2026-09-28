@@ -53,12 +53,21 @@ ganha. Cada um só é usado se a respetiva chave estiver definida.
   "EDP - Energias de Portugal") para ações que as APIs não conhecem.
 - **Moeda**: escolhe a moeda em que a ação é cotada — não há conversão
   cambial, por isso os totais aparecem separados por moeda.
-- **Cache**: cotações ficam em `quotes_cache` durante `QUOTE_CACHE_TTL_MINUTES`
-  (60) ou `QUOTE_AI_CACHE_TTL_MINUTES` (360) se vieram da AI. Falhas também
-  ficam em cache (`quote_lookup_failures`): um ticker que nenhum fornecedor
-  encontrou só é pesquisado de novo ao fim de `QUOTE_NOT_FOUND_RETRY_HOURS`
-  (24); falhas temporárias (limites, rede) ao fim de
-  `QUOTE_UNAVAILABLE_RETRY_MINUTES` (60). Entretanto mostra-se a última cotação conhecida.
+- **Cache e atualização**:
+  - O dashboard **nunca espera pelas APIs**: mostra sempre o último valor guardado
+    em `quotes_cache`. Se uma cotação tiver mais do que o intervalo escolhido pelo
+    utilizador em **Definições** (5–1440 min, default 60), é atualizada em segundo
+    plano depois de a página ser enviada, e a página recarrega sozinha quando termina.
+  - Cotações obtidas por AI só são atualizadas automaticamente a cada
+    `QUOTE_AI_CACHE_TTL_MINUTES` (360) no mínimo, por causa do custo.
+  - O botão **"Atualizar cotações"** força a atualização de tudo o que tenha mais
+    de 5 minutos (cliques repetidos não gastam pedidos).
+  - Falhas também ficam em cache (`quote_lookup_failures`): um ticker que nenhum
+    fornecedor encontrou só é pesquisado de novo automaticamente ao fim de
+    `QUOTE_NOT_FOUND_RETRY_HOURS` (24); falhas temporárias ao fim de
+    `QUOTE_UNAVAILABLE_RETRY_MINUTES` (60).
+  - Um ticker só é atualizado por um pedido de cada vez (`claim_quote_refresh`),
+    para dois separadores abertos não pagarem a mesma pesquisa duas vezes.
 
 #### Pesquisa AI (último recurso)
 
@@ -148,6 +157,51 @@ qualquer cron (servidor, GitHub Actions `schedule`, etc.).
 Cada utilizador controla em `/settings` o resumo diário on/off e o limite de
 variação (%) que marca o email como alerta.
 
+## Editar o código tu mesmo
+
+O código está no GitHub em `aasilva/Fundamental`, branch
+`claude/stock-tracking-app-iieq9k`. Qualquer push para esse branch faz um novo
+deploy na Vercel automaticamente.
+
+- **No browser, sem instalar nada** (ideal para alterações pequenas): abre o
+  repositório no GitHub, escolhe o branch acima e carrega na tecla **`.`**
+  para abrir o editor (VS Code no browser, github.dev). Edita, e no painel
+  *Source Control* faz *Commit & Push*. Para um único ficheiro, também podes usar
+  o ícone do lápis na página do ficheiro.
+- **No teu computador** (para testar antes de publicar):
+
+  ```bash
+  git clone https://github.com/aasilva/Fundamental.git
+  cd Fundamental
+  git checkout claude/stock-tracking-app-iieq9k
+  npm install
+  cp .env.example .env.local   # preencher as chaves
+  npm run dev                  # http://localhost:3000
+  npm test && npm run lint     # antes de fazer push
+  ```
+
+Onde mexer nas alterações mais comuns:
+
+| Quero mudar… | Ficheiro |
+|---|---|
+| Textos, colunas e layout do dashboard | `src/app/page.tsx` |
+| Campos do formulário de ações | `src/app/holdings/holding-form.tsx` + validação em `src/app/holdings/actions.ts` |
+| Moedas disponíveis | `SUPPORTED_CURRENCIES` em `src/lib/format.ts` |
+| Página de definições | `src/app/settings/page.tsx` + `actions.ts` |
+| Email diário (aspeto) | `src/lib/email/daily-summary.ts` |
+| Hora do email diário | `vercel.json` (cron em UTC) |
+| Piso do botão "Atualizar" (5 min) | `MANUAL_REFRESH_FLOOR_MINUTES` em `src/lib/quote-cache-policy.ts` |
+| Instruções dadas à pesquisa AI | `SYSTEM_PROMPT` em `src/lib/quote-providers/ai-web-search.ts` |
+| Cores / estilos | classes Tailwind diretamente nos componentes |
+
+Alterações à **base de dados** (novas colunas/tabelas) precisam de SQL no
+Supabase (SQL Editor) e de um novo ficheiro em `supabase/migrations/`, e o
+`src/lib/supabase/database.types.ts` tem de ser atualizado. Para essas, é mais
+seguro pedires-me.
+
+Se voltares a pedir-me alterações depois de editares, eu começo sempre por ir
+buscar a versão mais recente do branch, por isso as tuas mudanças não se perdem.
+
 ## Estrutura do projeto
 
 ```
@@ -156,7 +210,8 @@ src/
     login/, signup/           páginas + server actions de autenticação
     auth/confirm/             confirmação de email (PKCE code ou token_hash)
     holdings/                 CRUD de posições (novo, editar, eliminar)
-    settings/                 preferências de notificações
+    settings/                 definições (intervalo das cotações, notificações)
+    quotes/actions.ts         botão "Atualizar cotações"
     api/cron/daily-summary/   endpoint chamado pelo cron
     page.tsx, loading.tsx     dashboard (lista + totais por moeda)
   components/                 botões com estado pendente / confirmação

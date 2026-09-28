@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { Resend } from "resend";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getQuotes } from "@/lib/quotes";
+import { automaticPolicy } from "@/lib/quote-cache-policy";
 import { computePnl, summarizeByCurrency } from "@/lib/calculations";
 import { renderDailySummaryEmail } from "@/lib/email/daily-summary";
 
@@ -30,7 +31,7 @@ export async function GET(request: NextRequest) {
   const resend = new Resend(process.env.RESEND_API_KEY);
 
   const { data: settings, error: settingsError } = await admin
-    .from("notification_settings")
+    .from("user_settings")
     .select("*")
     .eq("daily_summary_enabled", true);
 
@@ -54,7 +55,10 @@ export async function GET(request: NextRequest) {
   }
 
   // Uma só ronda de cotações para todos os utilizadores (poupa pedidos à Alpha Vantage).
-  const { quotes } = await getQuotes(allHoldings ?? []);
+  const { quotes } = await getQuotes(allHoldings ?? [], {
+    policy: automaticPolicy(),
+    mode: "wait",
+  });
 
   const results: Array<{ user_id: string; status: string }> = [];
 
@@ -101,7 +105,7 @@ export async function GET(request: NextRequest) {
     }
 
     await admin
-      .from("notification_settings")
+      .from("user_settings")
       .update({ last_notified_at: new Date().toISOString() })
       .eq("user_id", setting.user_id);
 

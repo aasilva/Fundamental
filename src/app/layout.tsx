@@ -45,7 +45,7 @@ export default async function RootLayout({
                 href="/settings"
                 className="text-sm text-zinc-500 hover:underline dark:text-zinc-400"
               >
-                Notificações
+                Definições
               </Link>
               <span className="text-sm text-zinc-500 dark:text-zinc-400">
                 {user.email}

@@ -1,10 +1,14 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { getQuotes } from "@/lib/quotes";
+import { automaticPolicy, MANUAL_REFRESH_FLOOR_MINUTES } from "@/lib/quote-cache-policy";
 import { computePnl, summarizeByCurrency } from "@/lib/calculations";
 import { formatCurrency, formatDate, formatDateTime, formatPct } from "@/lib/format";
 import { DeleteHoldingButton } from "@/components/delete-holding-button";
+import { QuoteRefreshPoller } from "@/components/quote-refresh-poller";
+import { RefreshQuotesButton } from "@/components/refresh-quotes-button";
 import { deleteHolding } from "./holdings/actions";
+import { refreshQuotesNow } from "./quotes/actions";
 
 function pnlColor(value: number) {
   if (value > 0) return "text-emerald-600 dark:text-emerald-400";
@@ -12,22 +16,33 @@ function pnlColor(value: number) {
   return "text-zinc-500 dark:text-zinc-400";
 }
 
-// A pesquisa AI (último recurso) pode demorar dezenas de segundos.
+// A atualização em segundo plano (after) e o botão "Atualizar" correm dentro deste limite;
+// a pesquisa AI pode demorar dezenas de segundos.
 export const maxDuration = 300;
 
 const cardClass =
   "rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-zinc-950";
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ atualizadas?: string; em_curso?: string }>;
+}) {
+  const params = await searchParams;
   const supabase = await createClient();
 
-  const { data: holdings } = await supabase
-    .from("holdings")
-    .select("*")
-    .order("entry_date", { ascending: false });
+  const [{ data: holdings }, { data: settings }] = await Promise.all([
+    supabase.from("holdings").select("*").order("entry_date", { ascending: false }),
+    supabase.from("user_settings").select("quote_refresh_minutes").maybeSingle(),
+  ]);
 
   const rows = holdings ?? [];
-  const { quotes, failures } = await getQuotes(rows);
+  const refreshMinutes = settings?.quote_refresh_minutes ?? 60;
+  // Nunca espera pelas APIs: mostra a cache e atualiza o que estiver desatualizado em segundo plano.
+  const { quotes, failures, refreshing } = await getQuotes(rows, {
+    policy: automaticPolicy(refreshMinutes),
+    mode: "background",
+  });
 
   const withPnl = rows.map((h) => computePnl(h, quotes[h.ticker]));
   const summaries = summarizeByCurrency(withPnl);
@@ -43,13 +58,31 @@ export default async function DashboardPage() {
         <h1 className="text-2xl font-semibold text-zinc-950 dark:text-zinc-50">
           A minha carteira
         </h1>
-        <Link
-          href="/holdings/new"
-          className="rounded-md bg-zinc-950 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-950 dark:hover:bg-zinc-200"
-        >
-          + Adicionar ação
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          {rows.length > 0 ? (
+            <form action={refreshQuotesNow}>
+              <RefreshQuotesButton />
+            </form>
+          ) : null}
+          <Link
+            href="/holdings/new"
+            className="rounded-md bg-zinc-950 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-950 dark:hover:bg-zinc-200"
+          >
+            + Adicionar ação
+          </Link>
+        </div>
       </div>
+
+      {params.atualizadas !== undefined ? (
+        <p className="mt-4 rounded-md bg-zinc-100 px-3 py-2 text-sm text-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
+          {Number(params.atualizadas) > 0
+            ? `${params.atualizadas} cotação(ões) atualizada(s).`
+            : `As cotações já estavam atualizadas (o botão só volta a pedir cada ticker ao fim de ${MANUAL_REFRESH_FLOOR_MINUTES} minutos).`}
+          {Number(params.em_curso) > 0 ? ` ${params.em_curso} ainda em atualização noutro pedido.` : ""}
+        </p>
+      ) : null}
+
+      <QuoteRefreshPoller count={refreshing.length} />
 
       {summaries.map((s) => (
         <div key={s.currency} className="mt-6">
@@ -195,8 +228,8 @@ export default async function DashboardPage() {
 
       {oldestQuote ? (
         <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
-          Cotações atualizadas desde {formatDateTime(oldestQuote)} (cache de{" "}
-          {process.env.QUOTE_CACHE_TTL_MINUTES ?? 60} min).
+          Cotação mais antiga: {formatDateTime(oldestQuote)}. Atualização automática a cada{" "}
+          {refreshMinutes} min (<Link href="/settings" className="underline">alterar</Link>).
         </p>
       ) : null}
     </div>
