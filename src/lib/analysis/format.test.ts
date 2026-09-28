@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { formatMetricValue, buildMarkdownReport } from "./format";
-import { METRIC_FIELDS, SECTION_FIELDS, type AnalysisMetrics, type AnalysisSections } from "./tool-schema";
+import { METRIC_FIELDS, SECTION_FIELDS, type AnalysisSections } from "./tool-schema";
 
 describe("formatMetricValue", () => {
   it("returns an em dash for null or non-finite values", () => {
@@ -33,44 +33,19 @@ describe("SECTION_FIELDS / METRIC_FIELDS", () => {
 });
 
 describe("buildMarkdownReport", () => {
-  const metrics: AnalysisMetrics = Object.fromEntries(
-    METRIC_FIELDS.map((m) => [m.key, null]),
-  ) as unknown as AnalysisMetrics;
-  metrics.currency = "EUR";
-  metrics.as_of = "2026-01-01";
-
-  it("includes the summary and every non-empty section, in order, with a heading", () => {
+  it("contains every section in order, but not the summary or evolution (shown separately)", () => {
     const sections = Object.fromEntries(SECTION_FIELDS.map((s) => [s.key, `texto de ${s.key}`])) as unknown as AnalysisSections;
     sections.resumo_executivo = "resumo curto";
-    sections.evolucao_desde_ultima_analise = null;
-    sections.company_name_resolved = "Empresa Teste";
-    sections.ticker_resolved = "TST";
-    sections.isin_resolved = null;
-    sections.exchange = null;
+    sections.evolucao_desde_ultima_analise = "mudou muito";
 
-    const markdown = buildMarkdownReport(sections, metrics);
+    const markdown = buildMarkdownReport(sections);
 
-    assert.match(markdown, /^## Resumo\n\nresumo curto/);
-    assert.doesNotMatch(markdown, /Evolução desde a última análise/);
+    assert.doesNotMatch(markdown, /resumo curto|mudou muito/);
+    assert.ok(markdown.startsWith(`## ${SECTION_FIELDS[0].title}`));
     for (const { title, key } of SECTION_FIELDS) {
       assert.match(markdown, new RegExp(`## ${title}\\n\\ntexto de ${key}`));
     }
-    // As secções mantêm a ordem definida em SECTION_FIELDS.
-    const firstIndex = markdown.indexOf(`## ${SECTION_FIELDS[0].title}`);
     const lastIndex = markdown.indexOf(`## ${SECTION_FIELDS.at(-1)!.title}`);
-    assert.ok(firstIndex >= 0 && lastIndex > firstIndex);
-  });
-
-  it("includes the evolution box only when present", () => {
-    const sections = Object.fromEntries(SECTION_FIELDS.map((s) => [s.key, "x"])) as unknown as AnalysisSections;
-    sections.resumo_executivo = "resumo";
-    sections.evolucao_desde_ultima_analise = "mudou muito";
-    sections.company_name_resolved = null;
-    sections.ticker_resolved = null;
-    sections.isin_resolved = null;
-    sections.exchange = null;
-
-    const markdown = buildMarkdownReport(sections, metrics);
-    assert.match(markdown, /## Evolução desde a última análise\n\nmudou muito/);
+    assert.ok(lastIndex > 0);
   });
 });

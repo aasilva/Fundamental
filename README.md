@@ -124,6 +124,17 @@ são dadas ao agente como contexto, e ele descreve explicitamente o que mudou.
   tenta outro automaticamente) e uma reserva atómica (`claim_analysis`) para
   que dois separadores abertos não paguem a mesma análise duas vezes.
 
+#### Importar análises feitas no ChatGPT ou no Claude (sem custos de API)
+
+Em `/analysis/import`: indicas a empresa e a app gera um prompt pronto a
+colar (a mesma persona, regras e secções do agente, mais as tuas análises
+anteriores à empresa para comparação). Fazes a análise no ChatGPT (Deep
+research) ou no Claude (Research) com a tua subscrição, e colas a resposta. A
+app separa o resumo, a evolução e as secções, e lê as métricas do bloco JSON
+no fim (`src/lib/analysis/import.ts`, testado) — aceita números como `12,5`,
+`1.234,5` ou `18.3x`. Se o bloco faltar ou tiver erros, a análise é guardada
+na mesma, sem métricas, e a página mostra o aviso.
+
 ### 4. Resend (emails)
 
 Cria conta em https://resend.com e gera uma API key em

@@ -1,19 +1,12 @@
-import { METRIC_FIELDS, SECTION_FIELDS, type AnalysisMetrics, type AnalysisSections, type MetricUnit } from "./tool-schema";
+import { METRIC_FIELDS, SECTION_FIELDS, type AnalysisSections, type MetricUnit } from "./tool-schema";
 
-export function buildMarkdownReport(sections: AnalysisSections, metrics: AnalysisMetrics): string {
+// Só as 17 secções: o resumo e a evolução são mostrados em caixas próprias na página do relatório.
+export function buildMarkdownReport(sections: AnalysisSections): string {
   const parts: string[] = [];
-
-  if (sections.resumo_executivo) {
-    parts.push(`## Resumo\n\n${sections.resumo_executivo}`);
-  }
-  if (sections.evolucao_desde_ultima_analise) {
-    parts.push(`## Evolução desde a última análise\n\n${sections.evolucao_desde_ultima_analise}`);
-  }
   for (const { key, title } of SECTION_FIELDS) {
     const body = sections[key];
     if (body) parts.push(`## ${title}\n\n${body}`);
   }
-  void metrics;
   return parts.join("\n\n");
 }
 

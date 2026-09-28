@@ -47,11 +47,28 @@ export default async function AnalysisListPage({
         </p>
       ) : null}
 
+      <Link
+        href="/analysis/import"
+        className="mt-6 flex items-center justify-between gap-4 rounded-xl border border-black/10 bg-white p-5 hover:border-zinc-400 dark:border-white/10 dark:bg-zinc-950 dark:hover:border-zinc-600"
+      >
+        <div>
+          <p className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+            Importar análise do ChatGPT ou do Claude
+          </p>
+          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+            Gera o prompt, faz a análise com a tua subscrição e cola aqui o resultado — sem custos de API.
+          </p>
+        </div>
+        <span className="text-zinc-400">→</span>
+      </Link>
+
       <form
         action={startAnalysis}
         className="mt-6 flex flex-col gap-4 rounded-xl border border-black/10 bg-white p-5 dark:border-white/10 dark:bg-zinc-950"
       >
-        <h2 className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">Nova análise</h2>
+        <h2 className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+          Nova análise automática (API, com custo)
+        </h2>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <div className="flex flex-col gap-1.5 sm:col-span-1">
             <label htmlFor="ticker" className="text-sm font-medium text-zinc-700 dark:text-zinc-300">

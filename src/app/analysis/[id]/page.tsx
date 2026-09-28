@@ -6,6 +6,7 @@ import { claimAndRunAnalysisStep } from "@/lib/analysis/runner";
 import { METRIC_FIELDS, formatMetricValue } from "@/lib/analysis/format";
 import type { AnalysisMetrics, AnalysisSections, AnalysisSource } from "@/lib/analysis/tool-schema";
 import { formatDateTime } from "@/lib/format";
+import { importSourceLabel } from "@/lib/analysis/import";
 import { AnalysisStatusBadge } from "@/components/analysis-status-badge";
 import { AnalysisPoller } from "@/components/analysis-poller";
 import { MarkdownReport } from "@/components/markdown-report";
@@ -16,8 +17,16 @@ import { retryAnalysis } from "../actions";
 // pode precisar de várias invocações — ver TIME_BUDGET_MS em lib/analysis/runner.ts.
 export const maxDuration = 300;
 
-export default async function AnalysisDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function AnalysisDetailPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ avisos?: string }>;
+}) {
   const { id } = await params;
+  const { avisos } = await searchParams;
+  const warnings = avisos ? avisos.split("|").filter(Boolean) : [];
   const supabase = await createClient();
 
   const { data: analysis } = await supabase.from("stock_analyses").select("*").eq("id", id).single();
@@ -34,6 +43,7 @@ export default async function AnalysisDetailPage({ params }: { params: Promise<{
   const metrics = analysis.metrics as AnalysisMetrics | null;
   const sources = (analysis.sources as AnalysisSource[] | null) ?? [];
   const state = analysis.run_state as { turns?: number } | null;
+  const importedFrom = importSourceLabel(analysis.model);
 
   return (
     <div className="mx-auto w-full max-w-3xl px-4 py-10">
@@ -50,9 +60,20 @@ export default async function AnalysisDetailPage({ params }: { params: Promise<{
       <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
         {analysis.ticker}
         {sections?.exchange ? ` · ${sections.exchange}` : ""}
-        {" · pedida em "}
+        {importedFrom ? ` · importada do ${importedFrom} em ` : " · pedida em "}
         {formatDateTime(analysis.requested_at)}
       </p>
+
+      {warnings.length > 0 ? (
+        <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+          <p className="font-medium">Análise guardada, com avisos:</p>
+          <ul className="mt-1 list-disc pl-5">
+            {warnings.map((w) => (
+              <li key={w}>{w}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       {isActive ? (
         <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
@@ -81,12 +102,14 @@ export default async function AnalysisDetailPage({ params }: { params: Promise<{
 
       {analysis.status === "completed" && sections ? (
         <>
-          <div className="mt-6 rounded-xl border border-black/10 bg-white p-5 dark:border-white/10 dark:bg-zinc-950">
-            <h2 className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">Resumo</h2>
-            <p className="mt-2 text-sm leading-relaxed text-zinc-700 dark:text-zinc-300">
-              {sections.resumo_executivo}
-            </p>
-          </div>
+          {sections.resumo_executivo ? (
+            <div className="mt-6 rounded-xl border border-black/10 bg-white p-5 dark:border-white/10 dark:bg-zinc-950">
+              <h2 className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">Resumo</h2>
+              <p className="mt-2 text-sm leading-relaxed text-zinc-700 dark:text-zinc-300">
+                {sections.resumo_executivo}
+              </p>
+            </div>
+          ) : null}
 
           {sections.evolucao_desde_ultima_analise ? (
             <div className="mt-4 rounded-xl border border-zinc-950/10 bg-zinc-50 p-5 dark:border-zinc-50/10 dark:bg-zinc-900">

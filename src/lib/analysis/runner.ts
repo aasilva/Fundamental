@@ -2,7 +2,8 @@ import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { hostname } from "@/lib/hostname";
-import { ANALYSIS_SYSTEM_PROMPT, buildUserPrompt, type PreviousAnalysisContext } from "./prompt";
+import { ANALYSIS_SYSTEM_PROMPT, buildUserPrompt } from "./prompt";
+import { loadPreviousContext } from "./previous";
 import { submitAnalysisTool, type SubmittedAnalysis } from "./tool-schema";
 import { buildMarkdownReport } from "./format";
 import type { Json, Tables } from "@/lib/supabase/database.types";
@@ -22,7 +23,6 @@ const TIME_BUDGET_MS = Number(process.env.ANALYSIS_TIME_BUDGET_MS ?? 260_000);
 const CLAIM_SECONDS = 300;
 // Limite de turnos (pausas/retomas) por invocação, independente do tempo — evita loops sem sair do sítio.
 const MAX_TURNS_PER_INVOCATION = 12;
-const PREVIOUS_ANALYSES_CONTEXT_LIMIT = 3;
 
 type Admin = ReturnType<typeof createAdminClient>;
 type AnalysisRow = Tables<"stock_analyses">;
@@ -44,33 +44,6 @@ export function stripIncompleteToolUse(content: Anthropic.Beta.BetaContentBlock[
   return content.filter((block) => block.type !== "tool_use");
 }
 
-async function loadPreviousContext(
-  admin: Admin,
-  userId: string,
-  companyKey: string,
-  excludeId: string,
-): Promise<PreviousAnalysisContext[]> {
-  const { data } = await admin
-    .from("stock_analyses")
-    .select("requested_at, sections, metrics")
-    .eq("user_id", userId)
-    .eq("company_key", companyKey)
-    .eq("status", "completed")
-    .neq("id", excludeId)
-    .order("requested_at", { ascending: false })
-    .limit(PREVIOUS_ANALYSES_CONTEXT_LIMIT);
-
-  return (data ?? []).map((row) => {
-    const sections = row.sections as Record<string, string | null> | null;
-    return {
-      requestedAt: row.requested_at,
-      summary: sections?.resumo_executivo ?? null,
-      conclusion: sections?.conclusao ?? null,
-      metrics: row.metrics,
-    };
-  });
-}
-
 async function failAnalysis(admin: Admin, id: string, message: string) {
   console.error(`Análise ${id} falhou: ${message}`);
   await admin
@@ -80,7 +53,7 @@ async function failAnalysis(admin: Admin, id: string, message: string) {
 }
 
 async function finalizeAnalysis(admin: Admin, id: string, report: SubmittedAnalysis) {
-  const markdown = buildMarkdownReport(report.sections, report.metrics);
+  const markdown = buildMarkdownReport(report.sections);
   await admin
     .from("stock_analyses")
     .update({

@@ -5,6 +5,8 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { IMPORT_SOURCES, parseImportedAnalysis } from "@/lib/analysis/import";
+import type { Json } from "@/lib/supabase/database.types";
 
 // Uma análise profunda demora minutos e tem custo real (pesquisa web + tokens) — evita que o
 // utilizador dispare várias em paralelo sem querer.
@@ -68,6 +70,78 @@ export async function startAnalysis(formData: FormData) {
   // do dashboard com as cotações) — não é preciso fazer nada mais aqui.
   revalidatePath("/analysis");
   redirect(`/analysis/${inserted.id}`);
+}
+
+const importSchema = startSchema.extend({
+  source: z.enum(Object.keys(IMPORT_SOURCES) as [keyof typeof IMPORT_SOURCES], "Origem inválida"),
+  report: z
+    .string()
+    .trim()
+    .min(300, "O texto colado é demasiado curto para ser uma análise completa.")
+    .max(400_000, "O texto colado é demasiado longo."),
+});
+
+export async function importAnalysis(formData: FormData) {
+  const supabase = await createClient();
+  const { data: userData } = await supabase.auth.getUser();
+  if (!userData.user) redirect("/login");
+
+  const parsed = importSchema.safeParse({
+    ticker: formData.get("ticker"),
+    company_name: formData.get("company_name"),
+    isin: formData.get("isin"),
+    source: formData.get("source"),
+    report: formData.get("report"),
+  });
+  if (!parsed.success) {
+    const params = new URLSearchParams({
+      ticker: String(formData.get("ticker") ?? ""),
+      error: parsed.error.issues.map((i) => i.message).join(", "),
+    });
+    redirect(`/analysis/import?${params}`);
+  }
+
+  const { ticker, company_name, isin, source, report } = parsed.data;
+  const result = parseImportedAnalysis(report);
+
+  const sections = {
+    resumo_executivo: result.summary ?? "",
+    evolucao_desde_ultima_analise: result.evolution,
+    conclusao: result.conclusion,
+    company_name_resolved: result.identity.companyName ?? (company_name || null),
+    ticker_resolved: result.identity.ticker,
+    isin_resolved: result.identity.isin ?? (isin || null),
+    exchange: result.identity.exchange,
+  };
+
+  const now = new Date().toISOString();
+  // Uma análise importada já nasce concluída: não passa pelo agente.
+  const { data: inserted, error } = await supabase
+    .from("stock_analyses")
+    .insert({
+      user_id: userData.user.id,
+      ticker,
+      company_name: sections.company_name_resolved,
+      isin: sections.isin_resolved,
+      status: "completed",
+      model: `import:${source}`,
+      report_markdown: result.markdown,
+      sections: sections as unknown as Json,
+      metrics: result.metrics as unknown as Json,
+      sources: [],
+      requested_at: now,
+      completed_at: now,
+    })
+    .select("id")
+    .single();
+
+  if (error || !inserted) {
+    redirect(`/analysis/import?${new URLSearchParams({ ticker, error: error?.message ?? "Não foi possível guardar a análise." })}`);
+  }
+
+  revalidatePath("/analysis");
+  const query = result.warnings.length > 0 ? `?avisos=${encodeURIComponent(result.warnings.join("|"))}` : "";
+  redirect(`/analysis/${inserted.id}${query}`);
 }
 
 export async function deleteAnalysis(formData: FormData) {
